@@ -25,10 +25,12 @@ func isMemSame(ta, tb reflect.Type) bool {
 	switch kind {
 	case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
-		reflect.Float32, reflect.Float64, reflect.Interface, reflect.String:
+		reflect.Float32, reflect.Float64, reflect.String:
 		return true
 	case reflect.Array:
 		return ta.Len() == tb.Len() && isMemSame(ta.Elem(), tb.Elem())
+	case reflect.Interface:
+		return ta.Implements(tb) && tb.Implements(ta)
 	case reflect.Map:
 		return isMemSame(ta.Key(), tb.Key()) && isMemSame(ta.Elem(), tb.Elem())
 	case reflect.Chan, reflect.Pointer, reflect.Slice:

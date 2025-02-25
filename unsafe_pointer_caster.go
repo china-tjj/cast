@@ -18,7 +18,7 @@ func getUnsafePointerCaster(fromType, toType reflect.Type) castFunc {
 			return true
 		}
 	case reflect.Interface:
-		return getUnwrapInterfaceCaster(fromType, toType)
+		return getUnpackInterfaceCaster(fromType, toType)
 	case reflect.Pointer, reflect.UnsafePointer:
 		return func(fromAddr, toAddr unsafe.Pointer) bool {
 			*(*unsafe.Pointer)(toAddr) = *(*unsafe.Pointer)(fromAddr)

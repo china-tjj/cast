@@ -5,9 +5,19 @@ import (
 	"unsafe"
 )
 
-func getUnwrapInterfaceCaster(fromType, toType reflect.Type) castFunc {
+type iface interface {
+	M()
+}
+
+func getUnpackInterfaceCaster(fromType, toType reflect.Type) castFunc {
 	return func(fromAddr, toAddr unsafe.Pointer) bool {
-		fromElem := reflect.NewAt(fromType, fromAddr).Elem().Elem()
+		var eface any
+		if fromType.NumMethod() == 0 {
+			eface = *(*any)(fromAddr)
+		} else {
+			eface = (any)(*(*iface)(fromAddr))
+		}
+		fromElem := reflect.ValueOf(eface)
 		elemCaster := getCaster(fromElem.Type(), toType)
 		if elemCaster == nil {
 			return false
@@ -30,7 +40,7 @@ func getAddressingPointerCaster(fromType, toType reflect.Type) castFunc {
 	}
 }
 
-func getUnwrapSliceCaster(fromType, toType reflect.Type) castFunc {
+func getUnpackSliceCaster(fromType, toType reflect.Type) castFunc {
 	fromElemType := fromType.Elem()
 	elemCaster := getCaster(fromElemType, toType)
 	if elemCaster == nil {
@@ -45,7 +55,7 @@ func getUnwrapSliceCaster(fromType, toType reflect.Type) castFunc {
 	}
 }
 
-func getUnwrapArrayCaster(fromType, toType reflect.Type) castFunc {
+func getUnpackArrayCaster(fromType, toType reflect.Type) castFunc {
 	if fromType.Len() != 1 {
 		return nil
 	}
@@ -59,7 +69,7 @@ func getUnwrapArrayCaster(fromType, toType reflect.Type) castFunc {
 	}
 }
 
-func getUnwrapStructCaster(fromType, toType reflect.Type) castFunc {
+func getUnpackStructCaster(fromType, toType reflect.Type) castFunc {
 	if fromType.NumField() != 1 {
 		return nil
 	}

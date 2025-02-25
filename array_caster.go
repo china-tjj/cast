@@ -47,7 +47,7 @@ func getArrayCaster(fromType, toType reflect.Type) castFunc {
 			return true
 		}
 	case reflect.Interface:
-		return getUnwrapInterfaceCaster(fromType, toType)
+		return getUnpackInterfaceCaster(fromType, toType)
 	case reflect.Pointer:
 		return getAddressingPointerCaster(fromType, toType)
 	case reflect.Slice:
@@ -85,7 +85,7 @@ func getArrayCaster(fromType, toType reflect.Type) castFunc {
 			return bytesCaster(unsafe.Pointer(&bytes), toAddr)
 		}
 	case reflect.Struct:
-		return getUnwrapStructCaster(fromType, toType)
+		return getUnpackStructCaster(fromType, toType)
 	default:
 		return nil
 	}

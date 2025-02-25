@@ -136,13 +136,13 @@ func getBoolCaster(fromType, toType reflect.Type) castFunc {
 			return true
 		}
 	case reflect.Array:
-		return getUnwrapArrayCaster(fromType, toType)
+		return getUnpackArrayCaster(fromType, toType)
 	case reflect.Interface:
-		return getUnwrapInterfaceCaster(fromType, toType)
+		return getUnpackInterfaceCaster(fromType, toType)
 	case reflect.Pointer:
 		return getAddressingPointerCaster(fromType, toType)
 	case reflect.Slice:
-		return getUnwrapSliceCaster(fromType, toType)
+		return getUnpackSliceCaster(fromType, toType)
 	case reflect.String:
 		return func(fromAddr, toAddr unsafe.Pointer) bool {
 			from := *(*string)(fromAddr)
@@ -155,7 +155,7 @@ func getBoolCaster(fromType, toType reflect.Type) castFunc {
 			return true
 		}
 	case reflect.Struct:
-		return getUnwrapStructCaster(fromType, toType)
+		return getUnpackStructCaster(fromType, toType)
 	default:
 		return nil
 	}

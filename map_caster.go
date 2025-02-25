@@ -13,9 +13,9 @@ import (
 func getMapCaster(fromType, toType reflect.Type) castFunc {
 	switch fromType.Kind() {
 	case reflect.Array:
-		return getUnwrapArrayCaster(fromType, toType)
+		return getUnpackArrayCaster(fromType, toType)
 	case reflect.Interface:
-		return getUnwrapInterfaceCaster(fromType, toType)
+		return getUnpackInterfaceCaster(fromType, toType)
 	case reflect.Map:
 		if isMemSame(fromType, toType) {
 			return func(fromAddr, toAddr unsafe.Pointer) bool {
@@ -58,7 +58,7 @@ func getMapCaster(fromType, toType reflect.Type) castFunc {
 	case reflect.Pointer:
 		return getAddressingPointerCaster(fromType, toType)
 	case reflect.Slice:
-		return getUnwrapSliceCaster(fromType, toType)
+		return getUnpackSliceCaster(fromType, toType)
 	case reflect.Struct:
 		toKeyType := toType.Key()
 		toKeyCaster := getCaster(typeFor[string](), toKeyType)

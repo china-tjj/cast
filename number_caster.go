@@ -92,9 +92,9 @@ func getNumberCaster[T Number](fromType, toType reflect.Type) castFunc {
 			return true
 		}
 	case reflect.Array:
-		return getUnwrapArrayCaster(fromType, toType)
+		return getUnpackArrayCaster(fromType, toType)
 	case reflect.Interface:
-		return getUnwrapInterfaceCaster(fromType, toType)
+		return getUnpackInterfaceCaster(fromType, toType)
 	case reflect.Pointer:
 		if toType.Kind() != reflect.Uintptr {
 			return getAddressingPointerCaster(fromType, toType)
@@ -104,7 +104,7 @@ func getNumberCaster[T Number](fromType, toType reflect.Type) castFunc {
 			return true
 		}
 	case reflect.Slice:
-		return getUnwrapSliceCaster(fromType, toType)
+		return getUnpackSliceCaster(fromType, toType)
 	case reflect.String:
 		switch toType.Kind() {
 		case reflect.Float32, reflect.Float64:
@@ -138,7 +138,7 @@ func getNumberCaster[T Number](fromType, toType reflect.Type) castFunc {
 			return nil
 		}
 	case reflect.Struct:
-		return getUnwrapStructCaster(fromType, toType)
+		return getUnpackStructCaster(fromType, toType)
 	case reflect.UnsafePointer:
 		if toType.Kind() != reflect.Uintptr {
 			return nil

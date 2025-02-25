@@ -27,7 +27,7 @@ func getStructCaster(fromType, toType reflect.Type) castFunc {
 			return true
 		}
 	case reflect.Interface:
-		return getUnwrapInterfaceCaster(fromType, toType)
+		return getUnpackInterfaceCaster(fromType, toType)
 	case reflect.Map:
 		fromKeyType := fromType.Key()
 		fromKeyCaster := getCaster(typeFor[string](), fromKeyType)

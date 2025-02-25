@@ -10,13 +10,13 @@ import (
 	"unsafe"
 )
 
-func getFinalElem(tpy reflect.Type) (int, reflect.Type) {
+func getFinalElem(typ reflect.Type) (int, reflect.Type) {
 	var depth int
-	for tpy.Kind() == reflect.Pointer {
+	for typ.Kind() == reflect.Pointer {
 		depth++
-		tpy = tpy.Elem()
+		typ = typ.Elem()
 	}
-	return depth, tpy
+	return depth, typ
 }
 
 func getPointerCaster(fromType, toType reflect.Type) castFunc {

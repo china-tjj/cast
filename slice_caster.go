@@ -10,23 +10,21 @@ import (
 	"unsafe"
 )
 
-func makeSlice(ptr unsafe.Pointer, tpy reflect.Type, len, cap int) *slice {
-	res := (*slice)(ptr)
-	*res = *(*slice)(getValueAddr(reflect.MakeSlice(tpy, len, cap)))
-	return res
-}
-
 func getSliceCaster(fromType, toType reflect.Type) castFunc {
 	switch fromType.Kind() {
 	case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
 		reflect.Float32, reflect.Float64:
-		caster := getCaster(fromType, toType.Elem())
+		toElemType := toType.Elem()
+		caster := getCaster(fromType, toElemType)
+		toElemSize := int(toElemType.Size())
 		if caster == nil {
 			return nil
 		}
 		return func(fromAddr, toAddr unsafe.Pointer) bool {
-			to := makeSlice(toAddr, toType, 1, 1)
+			s := make([]byte, toElemSize)
+			to := (*slice)(unsafe.Pointer(&s))
+			*(*slice)(toAddr) = *to
 			return caster(fromAddr, to.data)
 		}
 	case reflect.Array:
@@ -49,7 +47,9 @@ func getSliceCaster(fromType, toType reflect.Type) castFunc {
 		fromElemSize := fromElemType.Size()
 		toElemSize := toElemType.Size()
 		return func(fromAddr, toAddr unsafe.Pointer) bool {
-			to := makeSlice(toAddr, toType, length, length)
+			s := make([]byte, int(toElemSize)*length)
+			to := (*slice)(unsafe.Pointer(&s))
+			*(*slice)(toAddr) = *to
 			for i := 0; i < length; i++ {
 				elemCaster(offset(fromAddr, i, fromElemSize), offset(to.data, i, toElemSize))
 			}
@@ -76,7 +76,9 @@ func getSliceCaster(fromType, toType reflect.Type) castFunc {
 		toElemSize := toElemType.Size()
 		return func(fromAddr, toAddr unsafe.Pointer) bool {
 			from := (*slice)(fromAddr)
-			to := makeSlice(toAddr, toType, from.len, from.cap)
+			s := make([]byte, int(toElemSize)*from.len, int(toElemSize)*from.cap)
+			to := (*slice)(unsafe.Pointer(&s))
+			*(*slice)(toAddr) = *to
 			for i := 0; i < from.len; i++ {
 				elemCaster(offset(from.data, i, fromElemSize), offset(to.data, i, toElemSize))
 			}

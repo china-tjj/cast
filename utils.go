@@ -67,6 +67,35 @@ type value struct {
 	flag uintptr
 }
 
+type iface interface {
+	M()
+}
+
+type eface struct {
+	typ unsafe.Pointer
+	ptr unsafe.Pointer
+}
+
+func unpackInterface(typ reflect.Type, ptr unsafe.Pointer) (reflect.Type, unsafe.Pointer) {
+	var elem any
+	if typ.NumMethod() == 0 {
+		elem = *(*any)(ptr)
+	} else {
+		elem = any(*(*iface)(ptr))
+	}
+	unpackedType := reflect.TypeOf(elem)
+	unpackedPtr := (*eface)(unsafe.Pointer(&elem)).ptr
+	// 指针类型对应的eface/iface/value里的data/ptr直接会直接copy这个指针
+	// 值类型转对应的eface/iface/value里的data/ptr会指向这个值的拷贝
+	switch unpackedType.Kind() {
+	// chan 和 map 其实就是一个指针
+	case reflect.Chan, reflect.Map, reflect.Pointer:
+		return unpackedType, unsafe.Pointer(&unpackedPtr)
+	default:
+		return unpackedType, unpackedPtr
+	}
+}
+
 func getValueAddr(x reflect.Value) unsafe.Pointer {
 	ptr := (*value)(unsafe.Pointer(&x)).ptr
 	// 当可寻址时，ptr即该value的地址

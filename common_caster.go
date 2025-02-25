@@ -5,24 +5,14 @@ import (
 	"unsafe"
 )
 
-type iface interface {
-	M()
-}
-
 func getUnpackInterfaceCaster(fromType, toType reflect.Type) castFunc {
 	return func(fromAddr, toAddr unsafe.Pointer) bool {
-		var eface any
-		if fromType.NumMethod() == 0 {
-			eface = *(*any)(fromAddr)
-		} else {
-			eface = (any)(*(*iface)(fromAddr))
-		}
-		fromElem := reflect.ValueOf(eface)
-		elemCaster := getCaster(fromElem.Type(), toType)
+		fromElemType, fromElemAddr := unpackInterface(fromType, fromAddr)
+		elemCaster := getCaster(fromElemType, toType)
 		if elemCaster == nil {
 			return false
 		}
-		return elemCaster(getValueAddr(fromElem), toAddr)
+		return elemCaster(fromElemAddr, toAddr)
 	}
 }
 

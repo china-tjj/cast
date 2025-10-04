@@ -65,7 +65,7 @@ func getPointerCaster(fromType, toType reflect.Type) castFunc {
 				toDepth--
 				caster = sliceToElemPtrCaster
 			} else {
-				caster = newCaster(fromElemType, toElemType)
+				caster = getCaster(fromElemType, toElemType)
 			}
 		case reflect.Array:
 			if isMemSame(fromElemType.Elem(), toElemType) {
@@ -73,7 +73,7 @@ func getPointerCaster(fromType, toType reflect.Type) castFunc {
 				caster = arrayToElemPtrCaster
 			}
 		default:
-			caster = newCaster(fromElemType, toElemType)
+			caster = getCaster(fromElemType, toElemType)
 		}
 		if caster == nil {
 			return nil

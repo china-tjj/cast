@@ -34,7 +34,7 @@ func CastWithScope[F any, T any](s *Scope, from F) (to T, err error) {
 	if caster == nil {
 		return to, invalidCastErr(fromType, toType)
 	}
-	err = caster(unsafe.Pointer(&from), unsafe.Pointer(&to))
+	err = caster(s, noEscape(unsafe.Pointer(&from)), noEscape(unsafe.Pointer(&to)))
 	return to, err
 }
 
@@ -49,7 +49,7 @@ func GetCasterWithScope[F any, T any](s *Scope) func(from F) (to T, err error) {
 		}
 	}
 	return func(from F) (to T, err error) {
-		err = caster(unsafe.Pointer(&from), unsafe.Pointer(&to))
+		err = caster(s, noEscape(unsafe.Pointer(&from)), noEscape(unsafe.Pointer(&to)))
 		return to, err
 	}
 }
@@ -66,27 +66,27 @@ func ReflectCastWithScope(s *Scope, from reflect.Value, toType reflect.Type) (to
 	if fromAddr == nil {
 		return to, nil
 	}
-	err = caster(fromAddr, getValueAddr(to))
+	err = caster(s, fromAddr, getValueAddr(to))
 	return to, err
 }
 
 // WithCaster 注册自定义转换器，只能注册到新的作用域里，避免全局污染。允许传入nil，表示禁止这两个类型之间的转换
-func WithCaster[F any, T any](caster func(from F) (to T, err error)) ScopeOption {
+func WithCaster[F any, T any](caster func(s *Scope, from F) (to T, err error)) ScopeOption {
 	var wrappedCaster castFunc
 	if caster != nil {
-		wrappedCaster = func(fromAddr, toAddr unsafe.Pointer) error {
+		wrappedCaster = func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			var err error
-			*(*T)(toAddr), err = caster(*(*F)(fromAddr))
+			*(*T)(toAddr), err = caster(s, *(*F)(fromAddr))
 			return err
 		}
 	}
 	fromType, toType := typeFor[F](), typeFor[T]()
-	cacheKey := casterKey{fromTypePtr: typePtr(fromType), toTypePtr: typePtr(toType)}
+	key := casterKey{fromTypePtr: typePtr(fromType), toTypePtr: typePtr(toType)}
 	return func(s *Scope) {
 		if s.frozen {
 			return
 		}
-		s.casterMap[cacheKey] = wrappedCaster
+		s.casterMap[key] = wrappedCaster
 	}
 }
 

@@ -14,8 +14,8 @@ import (
 
 func getStringCaster(s *Scope, fromType, toType reflect.Type) castFunc {
 	if fromType.Implements(stringerType) {
-		return func(fromAddr, toAddr unsafe.Pointer) error {
-			from, _ := reflect.NewAt(fromType, fromAddr).Elem().Interface().(fmt.Stringer)
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
+			from, _ := packEface(fromType, fromAddr).(fmt.Stringer)
 			if from == nil {
 				return nilStringerErr
 			}
@@ -25,72 +25,72 @@ func getStringCaster(s *Scope, fromType, toType reflect.Type) castFunc {
 	}
 	switch fromType.Kind() {
 	case reflect.Bool:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*string)(toAddr) = strconv.FormatBool(*(*bool)(fromAddr))
 			return nil
 		}
 	case reflect.Int:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*string)(toAddr) = strconv.FormatInt(int64(*(*int)(fromAddr)), 10)
 			return nil
 		}
 	case reflect.Int8:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*string)(toAddr) = strconv.FormatInt(int64(*(*int8)(fromAddr)), 10)
 			return nil
 		}
 	case reflect.Int16:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*string)(toAddr) = strconv.FormatInt(int64(*(*int16)(fromAddr)), 10)
 			return nil
 		}
 	case reflect.Int32:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*string)(toAddr) = strconv.FormatInt(int64(*(*int32)(fromAddr)), 10)
 			return nil
 		}
 	case reflect.Int64:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*string)(toAddr) = strconv.FormatInt(*(*int64)(fromAddr), 10)
 			return nil
 		}
 	case reflect.Uint:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*string)(toAddr) = strconv.FormatUint(uint64(*(*uint)(fromAddr)), 10)
 			return nil
 		}
 	case reflect.Uint8:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*string)(toAddr) = strconv.FormatUint(uint64(*(*uint8)(fromAddr)), 10)
 			return nil
 		}
 	case reflect.Uint16:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*string)(toAddr) = strconv.FormatUint(uint64(*(*uint16)(fromAddr)), 10)
 			return nil
 		}
 	case reflect.Uint32:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*string)(toAddr) = strconv.FormatUint(uint64(*(*uint32)(fromAddr)), 10)
 			return nil
 		}
 	case reflect.Uint64:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*string)(toAddr) = strconv.FormatUint(*(*uint64)(fromAddr), 10)
 			return nil
 		}
 	case reflect.Uintptr:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*string)(toAddr) = strconv.FormatUint(uint64(*(*uintptr)(fromAddr)), 10)
 			return nil
 		}
 	case reflect.Float32:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*string)(toAddr) = strconv.FormatFloat(float64(*(*float32)(fromAddr)), 'g', -1, 32)
 			return nil
 		}
 	case reflect.Float64:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*string)(toAddr) = strconv.FormatFloat(*(*float64)(fromAddr), 'g', -1, 64)
 			return nil
 		}
@@ -101,7 +101,7 @@ func getStringCaster(s *Scope, fromType, toType reflect.Type) castFunc {
 	case reflect.Pointer:
 		return getAddressingPointerCaster(s, fromType, toType)
 	case reflect.String:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*string)(toAddr) = *(*string)(fromAddr)
 			return nil
 		}

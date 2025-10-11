@@ -25,27 +25,25 @@ func getMapCaster(s *Scope, fromType, toType reflect.Type) castFunc {
 		if elemCaster == nil {
 			return nil
 		}
-		mapNewer := getMapHelperNewer(fromType)
-		mapMaker := getMapHelperMaker(toType)
-		toKeySize := toKeyType.Size()
-		toElemSize := toElemType.Size()
-		return func(fromAddr, toAddr unsafe.Pointer) error {
-			if *(*unsafe.Pointer)(fromAddr) == nil {
+		fromMapHelper := getMapHelper(fromType)
+		toMapHelper := getMapHelper(toType)
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
+			from := *(*map[any]any)(fromAddr)
+			if from == nil {
 				return nil
 			}
-			from := mapNewer(fromAddr)
-			to := mapMaker(toAddr)
+			to := toMapHelper.Make(toAddr, len(from))
 			var err error
-			from.Range(func(key unsafe.Pointer, value unsafe.Pointer) bool {
-				toK := malloc(toKeySize)
-				if err = keyCaster(key, toK); err != nil {
+			fromMapHelper.Range(from, func(key unsafe.Pointer, value unsafe.Pointer) bool {
+				toK := newObject(toKeyType)
+				if err = keyCaster(s, key, toK); err != nil {
 					return false
 				}
-				toV := malloc(toElemSize)
-				if err = elemCaster(value, toV); err != nil {
+				toV := newObject(toElemType)
+				if err = elemCaster(s, value, toV); err != nil {
 					return false
 				}
-				to.Store(toK, toV)
+				toMapHelper.Store(to, toK, toV)
 				return true
 			})
 			return err
@@ -60,10 +58,10 @@ func getMapCaster(s *Scope, fromType, toType reflect.Type) castFunc {
 		}
 		toElemType := toType.Elem()
 		n := fromType.NumField()
-		mapMaker := getMapHelperMaker(toType)
+		toMapHelper := getMapHelper(toType)
 		if n == 0 {
-			return func(fromAddr, toAddr unsafe.Pointer) error {
-				mapMaker(toAddr)
+			return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
+				toMapHelper.Make(toAddr, 0)
 				return nil
 			}
 		}
@@ -77,25 +75,23 @@ func getMapCaster(s *Scope, fromType, toType reflect.Type) castFunc {
 			if fieldCasters[i] == nil {
 				continue
 			}
-			jsonTags[i] = field.Tag.Get("json")
+			jsonTags[i], _ = getDiffJsonTag(&field)
 			fieldNames[i] = field.Name
 			fieldOffsets[i] = field.Offset
 		}
-		toKeySize := toKeyType.Size()
-		toElemSize := toElemType.Size()
 		// map key会对外暴露，故每次new一个新的
 		getKey := func(i int) (unsafe.Pointer, error) {
-			k := malloc(toKeySize)
-			if jsonTags[i] != "" && keyCaster(unsafe.Pointer(&jsonTags[i]), k) == nil {
+			k := newObject(toKeyType)
+			if jsonTags[i] != "" && keyCaster(s, unsafe.Pointer(&jsonTags[i]), k) == nil {
 				return k, nil
 			}
-			if err := keyCaster(unsafe.Pointer(&fieldNames[i]), k); err != nil {
+			if err := keyCaster(s, unsafe.Pointer(&fieldNames[i]), k); err != nil {
 				return nil, err
 			}
 			return k, nil
 		}
-		return func(fromAddr, toAddr unsafe.Pointer) error {
-			to := mapMaker(toAddr)
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
+			to := toMapHelper.Make(toAddr, n)
 			for i := 0; i < n; i++ {
 				if fieldCasters[i] == nil {
 					continue
@@ -104,11 +100,11 @@ func getMapCaster(s *Scope, fromType, toType reflect.Type) castFunc {
 				if err != nil {
 					return err
 				}
-				v := malloc(toElemSize)
-				if err = fieldCasters[i](unsafe.Add(fromAddr, fieldOffsets[i]), v); err != nil {
+				v := newObject(toElemType)
+				if err = fieldCasters[i](s, unsafe.Add(fromAddr, fieldOffsets[i]), v); err != nil {
 					return err
 				}
-				to.Store(k, v)
+				toMapHelper.Store(to, k, v)
 			}
 			return nil
 		}

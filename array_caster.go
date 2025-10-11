@@ -15,10 +15,15 @@ func getArrayCaster(s *Scope, fromType, toType reflect.Type) castFunc {
 	case reflect.Array:
 		fromElemType := fromType.Elem()
 		toElemType := toType.Elem()
-		if isMemSame(fromElemType, toElemType) {
-			size := min(fromType.Size(), toType.Size())
-			return func(fromAddr, toAddr unsafe.Pointer) error {
-				memCopy(toAddr, fromAddr, size)
+		if isRefAble(s, fromElemType, toElemType) {
+			var arrayTypePtr unsafe.Pointer
+			if fromType.Len() <= toElemType.Len() {
+				arrayTypePtr = typePtr(fromType)
+			} else {
+				arrayTypePtr = typePtr(toType)
+			}
+			return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
+				typedmemmove(arrayTypePtr, toAddr, fromAddr)
 				return nil
 			}
 		}
@@ -29,9 +34,9 @@ func getArrayCaster(s *Scope, fromType, toType reflect.Type) castFunc {
 		length := min(fromType.Len(), toType.Len())
 		fromElemSize := fromElemType.Size()
 		toElemSize := toElemType.Size()
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			for i := 0; i < length; i++ {
-				if err := elemCaster(offset(fromAddr, i, fromElemSize), offset(toAddr, i, toElemSize)); err != nil {
+				if err := elemCaster(s, offset(fromAddr, i, fromElemSize), offset(toAddr, i, toElemSize)); err != nil {
 					return err
 				}
 			}
@@ -44,12 +49,12 @@ func getArrayCaster(s *Scope, fromType, toType reflect.Type) castFunc {
 	case reflect.Slice:
 		fromElemType := fromType.Elem()
 		toElemType := toType.Elem()
-		if isMemSame(fromElemType, toElemType) {
-			fromElemSize := fromElemType.Size()
-			toSize := toType.Size()
-			return func(fromAddr, toAddr unsafe.Pointer) error {
+		if isRefAble(s, fromElemType, toElemType) {
+			toElemTypePtr := typePtr(toElemType)
+			toLen := toType.Len()
+			return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 				from := *(*slice)(fromAddr)
-				memCopy(toAddr, from.data, min(uintptr(from.len)*fromElemSize, toSize))
+				typedslicecopy(toElemTypePtr, toAddr, toLen, from.data, from.len)
 				return nil
 			}
 		}
@@ -60,11 +65,11 @@ func getArrayCaster(s *Scope, fromType, toType reflect.Type) castFunc {
 		fromElemSize := fromElemType.Size()
 		toElemSize := toElemType.Size()
 		toLen := toElemType.Len()
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			from := *(*slice)(fromAddr)
 			length := min(from.len, toLen)
 			for i := 0; i < length; i++ {
-				if err := elemCaster(offset(from.data, i, fromElemSize), offset(toAddr, i, toElemSize)); err != nil {
+				if err := elemCaster(s, offset(from.data, i, fromElemSize), offset(toAddr, i, toElemSize)); err != nil {
 					return err
 				}
 			}

@@ -12,13 +12,13 @@ import (
 
 func getUnpackInterfaceCaster(s *Scope, fromType, toType reflect.Type) castFunc {
 	fromTypeNumMethod := fromType.NumMethod()
-	return func(fromAddr, toAddr unsafe.Pointer) error {
+	return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 		fromElemType, fromElemAddr := unpackInterface(fromTypeNumMethod, fromAddr)
 		elemCaster := getCaster(s, fromElemType, toType)
 		if elemCaster == nil {
 			return invalidCastErr(fromElemType, toType)
 		}
-		return elemCaster(fromElemAddr, toAddr)
+		return elemCaster(s, fromElemAddr, toAddr)
 	}
 }
 
@@ -27,12 +27,12 @@ func getAddressingPointerCaster(s *Scope, fromType, toType reflect.Type) castFun
 	if elemCaster == nil {
 		return nil
 	}
-	return func(fromAddr, toAddr unsafe.Pointer) error {
+	return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 		fromAddr = *(*unsafe.Pointer)(fromAddr)
 		if fromAddr == nil {
 			return nilPtrErr
 		}
-		return elemCaster(fromAddr, toAddr)
+		return elemCaster(s, fromAddr, toAddr)
 	}
 }
 
@@ -42,18 +42,18 @@ func getFromStringAsSliceCaster(s *Scope, toType reflect.Type) castFunc {
 		if runesCaster == nil {
 			return nil
 		}
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			runes := []rune(*(*string)(fromAddr))
-			return runesCaster(unsafe.Pointer(&runes), toAddr)
+			return runesCaster(s, unsafe.Pointer(&runes), toAddr)
 		}
 	} else {
 		bytesCaster := getCaster(s, bytesType, toType)
 		if bytesCaster == nil {
 			return nil
 		}
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			bytes := toBytes(*(*string)(fromAddr))
-			return bytesCaster(unsafe.Pointer(&bytes), toAddr)
+			return bytesCaster(s, unsafe.Pointer(&bytes), toAddr)
 		}
 	}
 }
@@ -64,9 +64,9 @@ func getToStringAsSliceCaster(s *Scope, fromType reflect.Type) castFunc {
 		if runesCaster == nil {
 			return nil
 		}
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			var runes []rune
-			if err := runesCaster(fromAddr, unsafe.Pointer(&runes)); err != nil {
+			if err := runesCaster(s, fromAddr, noEscape(unsafe.Pointer(&runes))); err != nil {
 				return err
 			}
 			*(*string)(toAddr) = string(runes)
@@ -77,9 +77,9 @@ func getToStringAsSliceCaster(s *Scope, fromType reflect.Type) castFunc {
 		if bytesCaster == nil {
 			return nil
 		}
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			var bytes []byte
-			if err := bytesCaster(fromAddr, unsafe.Pointer(&bytes)); err != nil {
+			if err := bytesCaster(s, fromAddr, unsafe.Pointer(&bytes)); err != nil {
 				return err
 			}
 			*(*string)(toAddr) = toString(bytes)
@@ -102,13 +102,13 @@ func getStringAsBridgeCaster(s *Scope, fromType, toType reflect.Type) castFunc {
 	if toTargetCaster == nil {
 		return nil
 	}
-	return func(fromAddr, toAddr unsafe.Pointer) error {
+	return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 		var st string
-		err := toStringCaster(fromAddr, unsafe.Pointer(&st))
+		err := toStringCaster(s, fromAddr, unsafe.Pointer(&st))
 		if err != nil {
 			return err
 		}
-		err = toTargetCaster(unsafe.Pointer(&st), toAddr)
+		err = toTargetCaster(s, unsafe.Pointer(&st), toAddr)
 		if err != nil {
 			return err
 		}

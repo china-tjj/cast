@@ -18,7 +18,7 @@ type Number interface {
 func getNumberCaster[T Number](s *Scope, fromType, toType reflect.Type) castFunc {
 	switch fromType.Kind() {
 	case reflect.Bool:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			if *(*bool)(fromAddr) {
 				*(*T)(toAddr) = 1
 			} else {
@@ -27,67 +27,67 @@ func getNumberCaster[T Number](s *Scope, fromType, toType reflect.Type) castFunc
 			return nil
 		}
 	case reflect.Int:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*T)(toAddr) = T(*(*int)(fromAddr))
 			return nil
 		}
 	case reflect.Int8:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*T)(toAddr) = T(*(*int8)(fromAddr))
 			return nil
 		}
 	case reflect.Int16:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*T)(toAddr) = T(*(*int16)(fromAddr))
 			return nil
 		}
 	case reflect.Int32:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*T)(toAddr) = T(*(*int32)(fromAddr))
 			return nil
 		}
 	case reflect.Int64:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*T)(toAddr) = T(*(*int64)(fromAddr))
 			return nil
 		}
 	case reflect.Uint:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*T)(toAddr) = T(*(*uint)(fromAddr))
 			return nil
 		}
 	case reflect.Uint8:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*T)(toAddr) = T(*(*uint8)(fromAddr))
 			return nil
 		}
 	case reflect.Uint16:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*T)(toAddr) = T(*(*uint16)(fromAddr))
 			return nil
 		}
 	case reflect.Uint32:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*T)(toAddr) = T(*(*uint32)(fromAddr))
 			return nil
 		}
 	case reflect.Uint64:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*T)(toAddr) = T(*(*uint64)(fromAddr))
 			return nil
 		}
 	case reflect.Uintptr:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*T)(toAddr) = T(*(*uintptr)(fromAddr))
 			return nil
 		}
 	case reflect.Float32:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*T)(toAddr) = T(*(*float32)(fromAddr))
 			return nil
 		}
 	case reflect.Float64:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*T)(toAddr) = T(*(*float64)(fromAddr))
 			return nil
 		}
@@ -97,14 +97,14 @@ func getNumberCaster[T Number](s *Scope, fromType, toType reflect.Type) castFunc
 		if toType.Kind() != reflect.Uintptr {
 			return getAddressingPointerCaster(s, fromType, toType)
 		}
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*uintptr)(toAddr) = uintptr(*(*unsafe.Pointer)(fromAddr))
 			return nil
 		}
 	case reflect.String:
 		switch toType.Kind() {
 		case reflect.Float32, reflect.Float64:
-			return func(fromAddr, toAddr unsafe.Pointer) error {
+			return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 				f64, err := strconv.ParseFloat(*(*string)(fromAddr), 10)
 				if err != nil {
 					return err
@@ -113,7 +113,7 @@ func getNumberCaster[T Number](s *Scope, fromType, toType reflect.Type) castFunc
 				return nil
 			}
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			return func(fromAddr, toAddr unsafe.Pointer) error {
+			return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 				i64, err := strconv.ParseInt(*(*string)(fromAddr), 10, 64)
 				if err != nil {
 					return err
@@ -122,7 +122,7 @@ func getNumberCaster[T Number](s *Scope, fromType, toType reflect.Type) castFunc
 				return nil
 			}
 		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-			return func(fromAddr, toAddr unsafe.Pointer) error {
+			return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 				ui64, err := strconv.ParseUint(*(*string)(fromAddr), 10, 64)
 				if err != nil {
 					return err
@@ -137,7 +137,7 @@ func getNumberCaster[T Number](s *Scope, fromType, toType reflect.Type) castFunc
 		if toType.Kind() != reflect.Uintptr {
 			return nil
 		}
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			*(*uintptr)(toAddr) = uintptr(*(*unsafe.Pointer)(fromAddr))
 			return nil
 		}

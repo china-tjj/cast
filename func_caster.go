@@ -35,7 +35,7 @@ func getFuncCaster(s *Scope, fromType, toType reflect.Type) castFunc {
 				return nil
 			}
 		}
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			from := reflect.NewAt(fromType, fromAddr).Elem()
 			to := reflect.MakeFunc(toType, func(args []reflect.Value) []reflect.Value {
 				for i, arg := range args {
@@ -72,7 +72,7 @@ func getReflectCaster(s *Scope, fromType reflect.Type, toType reflect.Type) refl
 		if fromAddr == nil {
 			return to, nil
 		}
-		err := caster(fromAddr, getValueAddr(to))
+		err := caster(s, fromAddr, getValueAddr(to))
 		return to, err
 	}
 }

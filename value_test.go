@@ -7,10 +7,6 @@ import (
 	"unsafe"
 )
 
-func ref[F, T any](f F) T {
-	return *(*T)(unsafe.Pointer(&f))
-}
-
 func testReflectValue[T any](t *testing.T, expectEqual bool) {
 	var ins T
 	p := ref[reflect.Value, value](reflect.ValueOf(ins)).ptr

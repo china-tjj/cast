@@ -75,6 +75,16 @@ func isMemSame(fromType, toType reflect.Type) bool {
 	}
 }
 
+func isRefAble(s *Scope, fromType, toType reflect.Type) bool {
+	if fromType == toType {
+		return true
+	}
+	if s.disableZeroCopy {
+		return false
+	}
+	return isMemSame(fromType, toType)
+}
+
 func typeFor[T any]() reflect.Type {
 	var v T
 	if t := reflect.TypeOf(v); t != nil {
@@ -84,7 +94,7 @@ func typeFor[T any]() reflect.Type {
 }
 
 func typePtr(t reflect.Type) unsafe.Pointer {
-	return (*eface)(unsafe.Pointer(&t)).ptr
+	return noEscape((*eface)(unsafe.Pointer(&t)).ptr)
 }
 
 func min[T Number](a, b T) T {
@@ -109,6 +119,25 @@ type eface struct {
 	ptr unsafe.Pointer
 }
 
+func packEface(typ reflect.Type, ptr unsafe.Pointer) any {
+	return *(*any)(unsafe.Pointer(&eface{
+		typ: typePtr(typ),
+		ptr: ptr,
+	}))
+}
+
+//go:nosplit
+func noEscape(p unsafe.Pointer) unsafe.Pointer {
+	x := uintptr(p)
+	return unsafe.Pointer(x ^ 0)
+}
+
+//go:nosplit
+func noEscapePtr[T any](p *T) *T {
+	x := uintptr(unsafe.Pointer(p))
+	return (*T)(unsafe.Pointer(x ^ 0))
+}
+
 func unpackInterface(numMethod int, ptr unsafe.Pointer) (reflect.Type, unsafe.Pointer) {
 	var elem any
 	if numMethod == 0 {
@@ -116,56 +145,58 @@ func unpackInterface(numMethod int, ptr unsafe.Pointer) (reflect.Type, unsafe.Po
 	} else {
 		elem = any(*(*iface)(ptr))
 	}
-	switch v := (elem).(type) {
+	unpackedPtr := (*eface)(unsafe.Pointer(&elem)).ptr
+	switch (elem).(type) {
 	case bool:
-		return boolType, unsafe.Pointer(&v)
+		return boolType, unpackedPtr
 	case int:
-		return intType, unsafe.Pointer(&v)
+		return intType, unpackedPtr
 	case int8:
-		return int8Type, unsafe.Pointer(&v)
+		return int8Type, unpackedPtr
 	case int16:
-		return int16Type, unsafe.Pointer(&v)
+		return int16Type, unpackedPtr
 	case int32:
-		return int32Type, unsafe.Pointer(&v)
+		return int32Type, unpackedPtr
 	case int64:
-		return int64Type, unsafe.Pointer(&v)
+		return int64Type, unpackedPtr
 	case uint:
-		return uintType, unsafe.Pointer(&v)
+		return uintType, unpackedPtr
 	case uint8:
-		return uint8Type, unsafe.Pointer(&v)
+		return uint8Type, unpackedPtr
 	case uint16:
-		return uint16Type, unsafe.Pointer(&v)
+		return uint16Type, unpackedPtr
 	case uint32:
-		return uint32Type, unsafe.Pointer(&v)
+		return uint32Type, unpackedPtr
 	case uint64:
-		return uint64Type, unsafe.Pointer(&v)
+		return uint64Type, unpackedPtr
 	case uintptr:
-		return uintptrType, unsafe.Pointer(&v)
+		return uintptrType, unpackedPtr
 	case float32:
-		return float32Type, unsafe.Pointer(&v)
+		return float32Type, unpackedPtr
 	case float64:
-		return float64Type, unsafe.Pointer(&v)
+		return float64Type, unpackedPtr
 	case string:
-		return stringType, unsafe.Pointer(&v)
+		return stringType, unpackedPtr
 	case []byte:
-		return bytesType, unsafe.Pointer(&v)
+		return bytesType, unpackedPtr
 	case []rune:
-		return runesType, unsafe.Pointer(&v)
+		return runesType, unpackedPtr
 	case map[string]any:
-		return jsonMapType, unsafe.Pointer(&v)
+		ptr2 := unpackedPtr
+		return jsonMapType, unsafe.Pointer(&ptr2)
 	case []any:
-		return jsonListType, unsafe.Pointer(&v)
+		return jsonListType, unpackedPtr
 	default:
 		break
 	}
 	unpackedType := reflect.TypeOf(elem)
-	unpackedPtr := (*eface)(unsafe.Pointer(&elem)).ptr
 	// 指针类型对应的eface/iface/value里的data/ptr直接会直接copy这个指针
 	// 值类型转对应的eface/iface/value里的data/ptr会指向这个值的拷贝
 	switch unpackedType.Kind() {
 	// chan、map、func 其实就是一个指针
 	case reflect.Chan, reflect.Map, reflect.Func, reflect.Pointer, reflect.UnsafePointer:
-		return unpackedType, unsafe.Pointer(&unpackedPtr)
+		ptr2 := unpackedPtr
+		return unpackedType, unsafe.Pointer(&ptr2)
 	default:
 		return unpackedType, unpackedPtr
 	}
@@ -182,7 +213,8 @@ func getValueAddr(v reflect.Value) unsafe.Pointer {
 	switch v.Kind() {
 	// chan、map、func 其实就是一个指针
 	case reflect.Chan, reflect.Map, reflect.Func, reflect.Pointer, reflect.UnsafePointer:
-		return unsafe.Pointer(&ptr)
+		ptr2 := ptr
+		return unsafe.Pointer(&ptr2)
 	default:
 		return ptr
 	}
@@ -192,14 +224,21 @@ func offset(data unsafe.Pointer, idx int, elemSize uintptr) unsafe.Pointer {
 	return unsafe.Add(data, uintptr(idx)*elemSize)
 }
 
-func memCopy(dst, src unsafe.Pointer, size uintptr) {
-	copy(unsafe.Slice((*byte)(dst), size), unsafe.Slice((*byte)(src), size))
+//go:linkname typedmemmove runtime.typedmemmove
+func typedmemmove(typ, dst, src unsafe.Pointer)
+
+//go:linkname typedslicecopy runtime.typedslicecopy
+func typedslicecopy(typ, dstPtr unsafe.Pointer, dstLen int, srcPtr unsafe.Pointer, srcLen int) int
+
+//go:linkname mallocgc runtime.mallocgc
+func mallocgc(size uintptr, typ unsafe.Pointer, needzero bool) unsafe.Pointer
+
+func newObject(typ reflect.Type) unsafe.Pointer {
+	return mallocgc(typ.Size(), typePtr(typ), true)
 }
 
-func malloc(size uintptr) unsafe.Pointer {
-	bytes := make([]byte, size)
-	return (*slice)(unsafe.Pointer(&bytes)).data
-}
+//go:linkname newarray runtime.newarray
+func newarray(typ unsafe.Pointer, n int) unsafe.Pointer
 
 type slice struct {
 	data unsafe.Pointer
@@ -207,9 +246,9 @@ type slice struct {
 	cap  int
 }
 
-func makeSlice(elemSize uintptr, len, cap int) slice {
+func makeSlice(elemType reflect.Type, len, cap int) slice {
 	return slice{
-		data: malloc(elemSize * uintptr(cap)),
+		data: newarray(typePtr(elemType), cap),
 		len:  len,
 		cap:  cap,
 	}
@@ -254,4 +293,15 @@ func isSpecialHash(typ reflect.Type) bool {
 	default:
 		return false
 	}
+}
+
+func getDiffJsonTag(f *reflect.StructField) (string, bool) {
+	if jsonTag, ok := f.Tag.Lookup("json"); ok && jsonTag != f.Name {
+		return jsonTag, true
+	}
+	return "", false
+}
+
+func ref[F, T any](f F) T {
+	return *(*T)(unsafe.Pointer(&f))
 }

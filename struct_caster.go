@@ -23,11 +23,10 @@ func getStructCaster(s *Scope, fromType, toType reflect.Type) castFunc {
 		fromElemType := fromType.Elem()
 		n := toType.NumField()
 		if n == 0 {
-			return func(fromAddr, toAddr unsafe.Pointer) error {
+			return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 				return nil
 			}
 		}
-		fromKeySize := fromKeyType.Size()
 		// json tag 对应的 map key
 		jsonTagKeys := make([]unsafe.Pointer, n)
 		// struct field 对应的 map key
@@ -40,14 +39,14 @@ func getStructCaster(s *Scope, fromType, toType reflect.Type) castFunc {
 			if caster == nil {
 				continue
 			}
-			if jsonTag, ok := field.Tag.Lookup("json"); ok {
-				jsonTagKey := malloc(fromKeySize)
-				if keyCaster(unsafe.Pointer(&jsonTag), jsonTagKey) == nil {
+			if jsonTag, ok := getDiffJsonTag(&field); ok {
+				jsonTagKey := newObject(fromKeyType)
+				if keyCaster(s, unsafe.Pointer(&jsonTag), jsonTagKey) == nil {
 					jsonTagKeys[i] = jsonTagKey
 				}
 			}
-			fieldKey := malloc(fromKeySize)
-			if keyCaster(unsafe.Pointer(&field.Name), fieldKey) == nil {
+			fieldKey := newObject(fromKeyType)
+			if keyCaster(s, unsafe.Pointer(&field.Name), fieldKey) == nil {
 				fieldKeys[i] = fieldKey
 			}
 			if jsonTagKeys[i] == nil && fieldKeys[i] == nil {
@@ -56,21 +55,21 @@ func getStructCaster(s *Scope, fromType, toType reflect.Type) castFunc {
 			fieldOffsets[i] = field.Offset
 			fieldCasters[i] = caster
 		}
-		mapNewer := getMapHelperNewer(fromType)
-		return func(fromAddr, toAddr unsafe.Pointer) error {
-			from := mapNewer(fromAddr)
+		fromMapHelper := getMapHelper(fromType)
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
+			from := *(*map[any]any)(fromAddr)
 			for i := 0; i < n; i++ {
 				var err1, err2 error
 				if jsonTagKeys[i] != nil {
-					if v, ok := from.Load(jsonTagKeys[i]); ok {
-						if err1 = fieldCasters[i](v, unsafe.Add(toAddr, fieldOffsets[i])); err1 == nil {
+					if v, ok := fromMapHelper.Load(from, jsonTagKeys[i]); ok {
+						if err1 = fieldCasters[i](s, v, unsafe.Add(toAddr, fieldOffsets[i])); err1 == nil {
 							continue
 						}
 					}
 				}
 				if fieldKeys[i] != nil {
-					if v, ok := from.Load(fieldKeys[i]); ok {
-						if err2 = fieldCasters[i](v, unsafe.Add(toAddr, fieldOffsets[i])); err2 == nil {
+					if v, ok := fromMapHelper.Load(from, fieldKeys[i]); ok {
+						if err2 = fieldCasters[i](s, v, unsafe.Add(toAddr, fieldOffsets[i])); err2 == nil {
 							continue
 						}
 					}
@@ -89,7 +88,7 @@ func getStructCaster(s *Scope, fromType, toType reflect.Type) castFunc {
 	case reflect.Struct:
 		nTo := toType.NumField()
 		if nTo == 0 {
-			return func(fromAddr, toAddr unsafe.Pointer) error {
+			return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 				return nil
 			}
 		}
@@ -136,12 +135,12 @@ func getStructCaster(s *Scope, fromType, toType reflect.Type) castFunc {
 		if casterCnt == 0 && nFrom > 0 {
 			return nil
 		}
-		return func(fromAddr, toAddr unsafe.Pointer) error {
+		return func(s *Scope, fromAddr, toAddr unsafe.Pointer) error {
 			for i := 0; i < nTo; i++ {
 				if casters[i] == nil {
 					continue
 				}
-				if err := casters[i](unsafe.Add(fromAddr, fromOffsets[i]), unsafe.Add(toAddr, toOffsets[i])); err != nil {
+				if err := casters[i](s, unsafe.Add(fromAddr, fromOffsets[i]), unsafe.Add(toAddr, toOffsets[i])); err != nil {
 					return err
 				}
 			}

@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func CastTimeToString(t time.Time) (string, error) {
+func CastTimeToString(s *cast.Scope, t time.Time) (string, error) {
 	return t.Format(time.DateTime), nil
 }
 

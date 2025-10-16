@@ -10,21 +10,26 @@ import (
 	"unsafe"
 )
 
-func getArrayCaster(s *Scope, fromType, toType reflect.Type) castFunc {
+func getArrayCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 	switch fromType.Kind() {
 	case reflect.Array:
 		fromElemType := fromType.Elem()
 		toElemType := toType.Elem()
-		if isMemSame(fromElemType, toElemType) {
-			size := min(fromType.Size(), toType.Size())
-			return func(fromAddr, toAddr unsafe.Pointer) error {
-				memCopy(toAddr, fromAddr, size)
-				return nil
+		if isRefAble(s, fromElemType, toElemType) {
+			var arrayTypePtr unsafe.Pointer
+			if fromType.Len() <= toElemType.Len() {
+				arrayTypePtr = typePtr(fromType)
+			} else {
+				arrayTypePtr = typePtr(toType)
 			}
+			return func(fromAddr, toAddr unsafe.Pointer) error {
+				typedmemmove(arrayTypePtr, toAddr, fromAddr)
+				return nil
+			}, false
 		}
-		elemCaster := getCaster(s, fromElemType, toElemType)
+		elemCaster, hasRef := getCaster(s, fromElemType, toElemType)
 		if elemCaster == nil {
-			return nil
+			return nil, false
 		}
 		length := min(fromType.Len(), toType.Len())
 		fromElemSize := fromElemType.Size()
@@ -36,7 +41,7 @@ func getArrayCaster(s *Scope, fromType, toType reflect.Type) castFunc {
 				}
 			}
 			return nil
-		}
+		}, hasRef
 	case reflect.Interface:
 		return getUnpackInterfaceCaster(s, fromType, toType)
 	case reflect.Pointer:
@@ -44,18 +49,18 @@ func getArrayCaster(s *Scope, fromType, toType reflect.Type) castFunc {
 	case reflect.Slice:
 		fromElemType := fromType.Elem()
 		toElemType := toType.Elem()
-		if isMemSame(fromElemType, toElemType) {
-			fromElemSize := fromElemType.Size()
-			toSize := toType.Size()
+		if isRefAble(s, fromElemType, toElemType) {
+			toElemTypePtr := typePtr(toElemType)
+			toLen := toType.Len()
 			return func(fromAddr, toAddr unsafe.Pointer) error {
 				from := *(*slice)(fromAddr)
-				memCopy(toAddr, from.data, min(uintptr(from.len)*fromElemSize, toSize))
+				typedslicecopy(toElemTypePtr, toAddr, toLen, from.data, from.len)
 				return nil
-			}
+			}, false
 		}
-		elemCaster := getCaster(s, fromElemType, toElemType)
+		elemCaster, _ := getCaster(s, fromElemType, toElemType)
 		if elemCaster == nil {
-			return nil
+			return nil, false
 		}
 		fromElemSize := fromElemType.Size()
 		toElemSize := toElemType.Size()
@@ -69,7 +74,7 @@ func getArrayCaster(s *Scope, fromType, toType reflect.Type) castFunc {
 				}
 			}
 			return nil
-		}
+		}, false
 	case reflect.String:
 		return getFromStringAsSliceCaster(s, toType)
 	default:

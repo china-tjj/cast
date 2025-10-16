@@ -2,13 +2,12 @@
 
 一个高性能、类型安全、支持复杂结构转换的 Go 泛型类型转换库。
 
-> 目前版本为 v0.1.0，处于开发阶段，存在潜在 bug，不建议用于生产环境。欢迎通过 Issues 反馈问题，
+> 目前版本为 v0.1.1，处于开发阶段，存在潜在 bug，不建议用于生产环境。欢迎通过 Issues 反馈问题，
 > 稳定版（v1.0.0）将在充分验证后发布。
 
 ## 简介
 
-`cast` 是一个基于泛型的通用类型转换工具，旨在简化 Go 语言中繁琐的类型转换，在保证类型安全与易用性的同时，性能开销不超过手写转换的
-2 倍。
+`cast` 是一个基于泛型的通用类型转换工具，旨在简化 Go 语言中繁琐的类型转换，在保证类型安全与易用性的同时，性能接近手写转换。
 
 ### 核心特性
 
@@ -94,7 +93,7 @@ type S2 struct {
 	V2 []float64
 }
 
-func handCaster(s1 *S1) (*S2, error) {
+func ManualCast(s1 *S1) (*S2, error) {
 	v1 := strconv.Itoa(s1.V1)
 	v2 := make([]float64, 0, len(s1.V2))
 	for _, v := range s1.V2 {
@@ -115,9 +114,9 @@ func BenchmarkStructCast(b *testing.B) {
 		V1: 1,
 		V2: []string{"1", "2"},
 	}
-	b.Run("HandCast", func(b *testing.B) {
+	b.Run("ManualCast", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			_, _ = handCaster(s1)
+			_, _ = ManualCast(s1)
 		}
 	})
 	b.Run("GetCaster", func(b *testing.B) {
@@ -137,12 +136,12 @@ func BenchmarkStructCast(b *testing.B) {
 **测试结果（Apple M3 Pro, Go 1.23）**：
 
 ```text
-BenchmarkStructCast/HandCast-12         	19024240	        62.02 ns/op
-BenchmarkStructCast/GetCaster-12        	12475611	        95.67 ns/op
-BenchmarkStructCast/Cast-12             	11074729	        110.6 ns/op
+BenchmarkStructCast/ManualCast-12         	18646762	        63.37 ns/op
+BenchmarkStructCast/GetCaster-12          	15932622	        74.69 ns/op
+BenchmarkStructCast/Cast-12               	13585936	        87.43 ns/op
 ```
 
-* `GetCaster` 的性能约为手写转换的 1.5 倍，`Cast` 约为 1.8 倍。
+* `GetCaster` 的性能约为手写转换的 1.2 倍，`Cast` 约为 1.4 倍。
 * 在大多数场景下，性能损耗完全可以接受，且换来的是极高的开发效率与类型安全性。
 
 ## 高级用法
@@ -195,24 +194,24 @@ cast.SetDefaultScope(scope)
 package main
 
 import (
-	"fmt"
-	"github.com/china-tjj/cast"
-	"time"
+  "fmt"
+  "github.com/china-tjj/cast"
+  "time"
 )
 
-func CastTimeToString(t time.Time) (string, error) {
-	return t.Format(time.DateTime), nil
+func CastTimeToString(s *cast.Scope, t time.Time) (string, error) {
+  return t.Format(time.DateTime), nil
 }
 
 func main() {
-	scope := cast.NewScope(cast.WithCaster(CastTimeToString))
-	t := time.Now()
+  scope := cast.NewScope(cast.WithCaster(CastTimeToString))
+  t := time.Now()
 
-	str, err := cast.CastWithScope[time.Time, string](scope, t)
-	fmt.Println(str, err) // 2025-10-04 19:55:54 <nil>
+  str, err := cast.CastWithScope[time.Time, string](scope, t)
+  fmt.Println(str, err) // 2025-10-04 19:55:54 <nil>
 
-	bytes, err := cast.CastWithScope[time.Time, []byte](scope, t)
-	fmt.Println(string(bytes), err) // 2025-10-04 19:55:54 <nil>
+  bytes, err := cast.CastWithScope[time.Time, []byte](scope, t)
+  fmt.Println(string(bytes), err) // 2025-10-04 19:55:54 <nil>
 }
 ```
 

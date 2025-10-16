@@ -30,18 +30,20 @@ func ReflectCast(from reflect.Value, toType reflect.Type) (to reflect.Value, err
 // CastWithScope 将类型F转为T，转换规则详见README
 func CastWithScope[F any, T any](s *Scope, from F) (to T, err error) {
 	fromType, toType := typeFor[F](), typeFor[T]()
-	caster := getCaster(s, fromType, toType)
+	caster, _ := getCaster(s, fromType, toType)
 	if caster == nil {
 		return to, invalidCastErr(fromType, toType)
 	}
-	err = caster(unsafe.Pointer(&from), unsafe.Pointer(&to))
+	// 当from包含指针时，这部分指针指向的内容会逃逸
+	escape(from)
+	err = caster(noEscape(unsafe.Pointer(&from)), noEscape(unsafe.Pointer(&to)))
 	return to, err
 }
 
 // GetCasterWithScope 获取实例化的转换方法，调用该方法返回的函数，对比直接调用 Cast 少了查缓存的步骤，性能会略微好一点
 func GetCasterWithScope[F any, T any](s *Scope) func(from F) (to T, err error) {
 	fromType, toType := typeFor[F](), typeFor[T]()
-	caster := getCaster(s, fromType, toType)
+	caster, _ := getCaster(s, fromType, toType)
 	if caster == nil {
 		e := invalidCastErr(fromType, toType)
 		return func(from F) (to T, err error) {
@@ -49,7 +51,9 @@ func GetCasterWithScope[F any, T any](s *Scope) func(from F) (to T, err error) {
 		}
 	}
 	return func(from F) (to T, err error) {
-		err = caster(unsafe.Pointer(&from), unsafe.Pointer(&to))
+		// 当from包含指针时，这部分指针指向的内容会逃逸
+		escape(from)
+		err = caster(noEscape(unsafe.Pointer(&from)), noEscape(unsafe.Pointer(&to)))
 		return to, err
 	}
 }
@@ -57,36 +61,35 @@ func GetCasterWithScope[F any, T any](s *Scope) func(from F) (to T, err error) {
 // ReflectCastWithScope 以反射的方式，需输入待转换的值与要转换的类型
 func ReflectCastWithScope(s *Scope, from reflect.Value, toType reflect.Type) (to reflect.Value, err error) {
 	fromType := from.Type()
-	caster := getCaster(s, fromType, toType)
+	caster, _ := getCaster(s, fromType, toType)
 	if caster == nil {
-		return to, invalidCastErr(fromType, toType)
+		return reflect.Value{}, invalidCastErr(fromType, toType)
 	}
-	fromAddr := getValueAddr(from)
-	to = reflect.New(toType).Elem()
-	if fromAddr == nil {
-		return to, nil
+	if !from.IsValid() {
+		return reflect.Zero(toType), nil
 	}
-	err = caster(fromAddr, getValueAddr(to))
-	return to, err
+	toPtr := reflect.New(toType)
+	err = caster(getValueAddr(from), toPtr.UnsafePointer())
+	return toPtr.Elem(), err
 }
 
 // WithCaster 注册自定义转换器，只能注册到新的作用域里，避免全局污染。允许传入nil，表示禁止这两个类型之间的转换
-func WithCaster[F any, T any](caster func(from F) (to T, err error)) ScopeOption {
-	var wrappedCaster castFunc
-	if caster != nil {
-		wrappedCaster = func(fromAddr, toAddr unsafe.Pointer) error {
-			var err error
-			*(*T)(toAddr), err = caster(*(*F)(fromAddr))
-			return err
-		}
-	}
+func WithCaster[F any, T any](caster func(s *Scope, from F) (to T, err error)) ScopeOption {
 	fromType, toType := typeFor[F](), typeFor[T]()
-	cacheKey := casterKey{fromTypePtr: typePtr(fromType), toTypePtr: typePtr(toType)}
+	key := casterKey{fromTypePtr: typePtr(fromType), toTypePtr: typePtr(toType)}
 	return func(s *Scope) {
 		if s.frozen {
 			return
 		}
-		s.casterMap[cacheKey] = wrappedCaster
+		var wrappedCaster castFunc
+		if caster != nil {
+			wrappedCaster = func(fromAddr, toAddr unsafe.Pointer) error {
+				var err error
+				*(*T)(toAddr), err = caster(s, *(*F)(fromAddr))
+				return err
+			}
+		}
+		s.casterMap[key] = casterValue{wrappedCaster, false}
 	}
 }
 

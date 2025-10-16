@@ -7,6 +7,10 @@ import (
 	"unsafe"
 )
 
+func ref[F, T any](f F) T {
+	return *(*T)(unsafe.Pointer(&f))
+}
+
 func testHash[T comparable](t *testing.T, key T) {
 	m := make(map[T]struct{})
 	m[key] = struct{}{}

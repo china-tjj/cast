@@ -1,6 +1,7 @@
 package cast
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"runtime"
@@ -124,6 +125,13 @@ type S string
 func (s S) f() {}
 
 func TestIfaceCast(t *testing.T) {
+	s, err := Cast[I, string](S("123"))
+	if err != nil || s != "123" {
+		t.Fatal(err)
+	}
+}
+
+func TestIfaceMapCast(t *testing.T) {
 	iMap := map[I]struct{}{
 		S("123"): {},
 	}
@@ -194,8 +202,18 @@ func TestCast(t *testing.T) {
 			[]rune("123"),
 		},
 		{
-			map[int]bool{1: true, 2: true, 3: true},
 			map[string]bool{"1": true, "2": true, "3": true},
+			map[int]bool{1: true, 2: true, 3: true},
+			map[int32]bool{1: true, 2: true, 3: true},
+			map[int64]bool{1: true, 2: true, 3: true},
+			map[uint]bool{1: true, 2: true, 3: true},
+			map[uint32]bool{1: true, 2: true, 3: true},
+			map[uint64]bool{1: true, 2: true, 3: true},
+			map[uintptr]bool{1: true, 2: true, 3: true},
+		},
+		{
+			ptr(any(errors.New("123"))),
+			ptr(errors.New("123")),
 		},
 	}
 	for _, group := range equalGroups {
@@ -236,7 +254,7 @@ type S2 struct {
 	V2 []float64
 }
 
-func handCaster(s1 *S1) (*S2, error) {
+func ManualCast(s1 *S1) (*S2, error) {
 	v1 := strconv.Itoa(s1.V1)
 	v2 := make([]float64, 0, len(s1.V2))
 	for _, v := range s1.V2 {
@@ -257,9 +275,9 @@ func BenchmarkStructCast(b *testing.B) {
 		V1: 1,
 		V2: []string{"1", "2"},
 	}
-	b.Run("HandCast", func(b *testing.B) {
+	b.Run("ManualCast", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			_, _ = handCaster(s1)
+			_, _ = ManualCast(s1)
 		}
 	})
 	b.Run("GetCaster", func(b *testing.B) {

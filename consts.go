@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"time"
 )
 
 var nilPtrErr = errors.New("can't address nil pointer")
@@ -40,31 +39,5 @@ var (
 	jsonMapType  = typeFor[map[string]any]()
 	jsonListType = typeFor[[]any]()
 	stringerType = typeFor[fmt.Stringer]()
+	anyType      = typeFor[any]()
 )
-
-var timeFormats = []string{
-	time.Layout,
-	time.ANSIC,
-	time.UnixDate,
-	time.RubyDate,
-	time.RFC822,
-	time.RFC822Z,
-	time.RFC850,
-	time.RFC1123,
-	time.RFC1123Z,
-	time.RFC3339,
-	time.RFC3339Nano,
-	time.Kitchen,
-	time.Stamp,
-	time.StampMilli,
-	time.StampMicro,
-	time.StampNano,
-	time.DateTime,
-	time.DateOnly,
-	time.TimeOnly,
-}
-
-var defaultOptions = []ScopeOption{
-	WithCaster(castStringToTime),
-	WithCaster(castStringToDuration),
-}

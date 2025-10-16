@@ -10,29 +10,29 @@ import (
 	"unsafe"
 )
 
-func getFuncCaster(s *Scope, fromType, toType reflect.Type) castFunc {
+func getFuncCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 	switch fromType.Kind() {
 	case reflect.Func:
 		numIn := fromType.NumIn()
 		if numIn != toType.NumIn() {
-			return nil
+			return nil, false
 		}
 		numOut := fromType.NumOut()
 		if numOut != toType.NumOut() {
-			return nil
+			return nil, false
 		}
 		inCasters := make([]reflectCastFunc, numIn)
 		outCasters := make([]reflectCastFunc, numOut)
 		for i := 0; i < numIn; i++ {
 			inCasters[i] = getReflectCaster(s, toType.In(i), fromType.In(i))
 			if inCasters[i] == nil {
-				return nil
+				return nil, false
 			}
 		}
 		for i := 0; i < numOut; i++ {
 			outCasters[i] = getReflectCaster(s, fromType.Out(i), toType.Out(i))
 			if outCasters[i] == nil {
-				return nil
+				return nil, false
 			}
 		}
 		return func(fromAddr, toAddr unsafe.Pointer) error {
@@ -47,32 +47,32 @@ func getFuncCaster(s *Scope, fromType, toType reflect.Type) castFunc {
 				}
 				return outs
 			})
-			*(*unsafe.Pointer)(toAddr) = *(*unsafe.Pointer)(getValueAddr(to))
+			_, fnPtr, _ := unpackEface(to.Interface())
+			*(*unsafe.Pointer)(toAddr) = fnPtr
 			return nil
-		}
+		}, false
 	case reflect.Interface:
 		return getUnpackInterfaceCaster(s, fromType, toType)
 	case reflect.Pointer:
 		return getAddressingPointerCaster(s, fromType, toType)
 	default:
-		return nil
+		return nil, false
 	}
 }
 
 type reflectCastFunc func(from reflect.Value) (reflect.Value, error)
 
 func getReflectCaster(s *Scope, fromType reflect.Type, toType reflect.Type) reflectCastFunc {
-	caster := getCaster(s, fromType, toType)
+	caster, _ := getCaster(s, fromType, toType)
 	if caster == nil {
 		return nil
 	}
 	return func(from reflect.Value) (reflect.Value, error) {
-		fromAddr := getValueAddr(from)
-		to := reflect.New(toType).Elem()
-		if fromAddr == nil {
-			return to, nil
+		if !from.IsValid() {
+			return reflect.Zero(toType), nil
 		}
-		err := caster(fromAddr, getValueAddr(to))
-		return to, err
+		toPtr := reflect.New(toType)
+		err := caster(getValueAddr(from), toPtr.UnsafePointer())
+		return toPtr.Elem(), err
 	}
 }

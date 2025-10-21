@@ -13,8 +13,18 @@ import (
 )
 
 func getStringCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
+	if fromType == nil {
+		return nil, false
+	}
 	if fromType.Implements(stringerType) {
+		fromTypeIsPtr := isPtrType(fromType)
 		return func(fromAddr, toAddr unsafe.Pointer) error {
+			if fromTypeIsPtr {
+				fromAddr = *(*unsafe.Pointer)(fromAddr)
+				if fromAddr == nil {
+					return nilPtrErr
+				}
+			}
 			from, _ := packEface(fromType, fromAddr).(fmt.Stringer)
 			if from == nil {
 				return nilStringerErr
@@ -92,6 +102,16 @@ func getStringCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 	case reflect.Float64:
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			*(*string)(toAddr) = strconv.FormatFloat(*(*float64)(fromAddr), 'g', -1, 64)
+			return nil
+		}, false
+	case reflect.Complex64:
+		return func(fromAddr, toAddr unsafe.Pointer) error {
+			*(*string)(toAddr) = strconv.FormatComplex(complex128(*(*complex64)(fromAddr)), 'g', -1, 64)
+			return nil
+		}, false
+	case reflect.Complex128:
+		return func(fromAddr, toAddr unsafe.Pointer) error {
+			*(*string)(toAddr) = strconv.FormatComplex(*(*complex128)(fromAddr), 'g', -1, 128)
 			return nil
 		}, false
 	case reflect.Array, reflect.Slice:

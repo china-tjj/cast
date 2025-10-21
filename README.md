@@ -2,7 +2,7 @@
 
 一个高性能、类型安全、支持复杂结构转换的 Go 泛型类型转换库。
 
-> 目前版本为 v0.1.1，处于开发阶段，存在潜在 bug，不建议用于生产环境。欢迎通过 Issues 反馈问题，
+> 目前版本为 v0.1.2，处于开发阶段，存在潜在 bug，不建议用于生产环境。欢迎通过 Issues 反馈问题，
 > 稳定版（v1.0.0）将在充分验证后发布。
 
 ## 简介
@@ -142,18 +142,17 @@ BenchmarkStructCast/Cast-12               	13585936	        87.43 ns/op
 ```
 
 * `GetCaster` 的性能约为手写转换的 1.2 倍，`Cast` 约为 1.4 倍。
+* `GetCaster` 的性能损耗主要是因为闭包无法内联，`Cast` 还有查询缓存的开销，因此整体会逊色于手写转换与代码生成。
 * 在大多数场景下，性能损耗完全可以接受，且换来的是极高的开发效率与类型安全性。
 
-## 高级用法
-
-### 作用域
+## 高级用法-作用域
 
 作用域是 `cast`
 库中用于隔离转换规则的重要机制。在复杂项目中，不同模块可能需要不同的转换规则（例如，某些模块需要自定义时间格式转换，而其他模块则需要标准转换方式），通过作用域可以为不同上下文提供独立的转换规则，避免全局设置导致的意外行为。
 
 #### 创建自定义作用域
 
-可以通过 `cast.NewScope` 函数创建新的作用域，并配置特定的转换规则：
+可以通过 `cast.NewScope` 函数创建新的作用域，并进行自定义配置：
 
 ```go
 scope := cast.NewScope(
@@ -186,48 +185,77 @@ str, err := caster(t)
 cast.SetDefaultScope(scope)
 ```
 
-### 自定义转换器
+### 1. 自定义转换器
 
-`time.Time` 转 `string` 时，默认调用 `String` 方法，如果有自定义格式的需求，可以按照以下示例自定义转换器：
+支持自定义自定义转换器，例如以下示例自定义，自定义 `time.Time` 转 `string` 的格式：
 
 ```go
 package main
 
 import (
-  "fmt"
-  "github.com/china-tjj/cast"
-  "time"
+	"fmt"
+	"github.com/china-tjj/cast"
+	"time"
 )
 
 func CastTimeToString(s *cast.Scope, t time.Time) (string, error) {
-  return t.Format(time.DateTime), nil
+	return t.Format(time.DateTime), nil
 }
 
 func main() {
-  scope := cast.NewScope(cast.WithCaster(CastTimeToString))
-  t := time.Now()
+	scope := cast.NewScope(cast.WithCaster(CastTimeToString))
+	t := time.Now()
 
-  str, err := cast.CastWithScope[time.Time, string](scope, t)
-  fmt.Println(str, err) // 2025-10-04 19:55:54 <nil>
+	str, err := cast.CastWithScope[time.Time, string](scope, t)
+	fmt.Println(str, err) // 2025-10-04 19:55:54 <nil>
 
-  bytes, err := cast.CastWithScope[time.Time, []byte](scope, t)
-  fmt.Println(string(bytes), err) // 2025-10-04 19:55:54 <nil>
+	bytes, err := cast.CastWithScope[time.Time, []byte](scope, t)
+	fmt.Println(string(bytes), err) // 2025-10-04 19:55:54 <nil>
 }
 ```
 
-### 禁用零拷贝
+### 2. 禁用零拷贝
 
-零拷贝转换后，可能多个不同类型的变量共用一块内存，遇到并发问题时会加大排查难度，因此支持禁用零拷贝，示例如下：
+零拷贝转换后，可能多个不同类型的变量共用一块内存，遇到并发问题时会加大排查难度，因此支持禁用零拷贝
+（禁用内存布局相同时零拷贝强转，但是类型相同时仍只会浅拷贝），示例如下：
 
 ```go
 scope := cast.NewScope(cast.WithDisableZeroCopy())
+```
+
+### 3. 深拷贝
+
+所有转换均进行深拷贝，示例如下：
+
+```go
+scope := cast.NewScope(cast.WithDeepCopy())
+```
+
+类似于 `Cast` 和 `GetCaster`，本库简单封装了两个函数:
+
+```go
+func DeepCopy[T any](v T) (T, error)
+
+func GetDeepCopier[T any]() func (T) (T, error)
+```
+
+### 4. 访问结构体未导出字段
+
+本库在处理结构体相关转换时，默认会跳过未导出字段，但是支持访问结构体未导出字段，示例如下：
+
+```go
+scope := cast.NewScope(cast.WithUnexportedFields())
 ```
 
 ## 转换规则详解
 
 转换规则可递归应用于复合类型（如 struct、slice、map 等）。以下规则按优先级和逻辑组织：
 
-### 1. 零拷贝强转（内存布局一致）
+### 1. 错误判定机制
+
+* 递归转换时，只要有一处出现 error，则整体返回 error，该行为与标准库一致
+
+### 2. 零拷贝强转（内存布局一致）
 
 当类型 `F` 与 `T` 的底层内存布局完全一致时，通过 `unsafe` 指针重解释实现零拷贝转换。判定条件如下：
 
@@ -244,13 +272,14 @@ scope := cast.NewScope(cast.WithDisableZeroCopy())
     * **interface**：两个接口的方法集互为子集（即互相实现）
     * **func**：参数和返回值的数量、顺序一致，且对应类型内存布局一致
 
-### 2. 基础类型互转
+### 3. 基础类型互转
 
-* `bool`、各类 `int`、`uint`、`uintptr`、`float` 系列、`string` 之间支持相互转换
+* `bool`、各类 `int`、`uint`、`float` 系列、`string` 之间支持相互转换
+* 支持 `complex` 系列与 `string` 互转
 * 基于原生转换与标准库 `strconv` 实现，遵循标准语义
 * 若类型实现了 `fmt.Stringer` 接口，在转为 `string` 时优先调用该接口
 
-### 3. 序列类型互转
+### 4. 序列类型互转
 
 * 数组 `[N]F` 与切片 `[]T` 可互转，前提是 `F` 与 `T` 可转换；若内存布局一致，则支持零拷贝
 * 当 `F` 和 `T` 内存布局相同时，`[N]F` 与 `[]F` 可以转为 `*T`，但安全起见，转换不可逆
@@ -258,46 +287,41 @@ scope := cast.NewScope(cast.WithDisableZeroCopy())
 * `string` 与 `[]rune` / `[N]rune` 使用原生互转（非零拷贝）
 * `string` 与其他 `[]T` / `[N]T` 互转时，`string` 被视为 `[]byte` 处理
 
-### 4. 指针与非接口类型互转
+### 5. 指针与非接口类型互转
 
 * 若 `F` 和 `T` 可互转，其各自的多重指针之间也可以互转（如 `*int` 和 `**string` 可互转）
 * `pointer` 与非 `interface` 互转时，尝试用 `pointer` 指向的对象去互转
 
-### 5. Map 转换
+### 6. Map 转换
 
 * `map[K1]V1` → `map[K2]V2`：要求 `K1`→`K2` 与 `V1`→`V2` 均可转换
 * `map` → `struct`：
     * 优先使用字段的 `json` tag 作为键名
     * 若未匹配，则回退至字段名
-    * 成功匹配的字段值将按规则转换并赋值
+    * 成功匹配的字段值将按规则转换，若匹配成功但转换失败则会导致整体转换失败
 * `struct` → `map`：
     * 键名优先使用 `json` tag，其次使用字段名
-    * 字段值按转换规则映射为 map 的值
+    * 字段值按转换规则映射为 map 的值，若存在无法转换的字段，则不允许整体的转换
 
-### 6. Struct 互转
+### 7. Struct 互转
 
-* 字段映射优先依据 `json` tag 对齐
-* 未通过 tag 匹配的字段，尝试使用字段名对齐
-* 所有成功对齐的字段必须满足类型可转换
+* 字段映射优先依据 `json` tag 匹配
+* 未通过 tag 匹配的字段，尝试使用字段名匹配
+* 成功匹配的字段值将按规则转换，若匹配成功但转换失败则会导致整体转换失败
 
-### 7. Interface 转换
+### 8. Interface 转换
 
 * **目标为 interface**：要求源值的动态类型实现该接口
 * **源为 interface**：使用其动态值（即"拆箱"后）进行后续转换
 
-### 8. Func 转换
+### 9. Func 转换
 
 * `func(A1, A2) (R1, R2)` → `func(B1, B2) (S1, S2)`：
     * 参数数量与返回值数量必须一致
     * 每个 `Ai` 可转换为 `Bi`，每个 `Ri` 可转换为 `Si`
     * 转换后的函数在调用时自动完成参数与返回值的类型适配
 
-### 9. 特殊处理
+### 10. 特殊处理
 
 * `string` 转 `time.Time`：调用 `time.Parse`，依次尝试标准库里的所有格式进行转换
 * `string` 转 `time.Duration`：若字符串中含有时间单位，则调用 `time.ParseDuration`，否则视为转为 `int64`
-
-### 10. 错误判定机制
-
-* 递归转换时，只要有一处出现 error，则整体返回 error，该行为与标准库一致
-

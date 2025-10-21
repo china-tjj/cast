@@ -11,6 +11,12 @@ import (
 )
 
 func getFuncCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
+	if fromType == nil {
+		return func(fromAddr, toAddr unsafe.Pointer) error {
+			*(*func())(toAddr) = nil
+			return nil
+		}, false
+	}
 	switch fromType.Kind() {
 	case reflect.Func:
 		numIn := fromType.NumIn()
@@ -36,6 +42,10 @@ func getFuncCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 			}
 		}
 		return func(fromAddr, toAddr unsafe.Pointer) error {
+			if *(*func())(fromAddr) == nil {
+				*(*func())(toAddr) = nil
+				return nil
+			}
 			from := reflect.NewAt(fromType, fromAddr).Elem()
 			to := reflect.MakeFunc(toType, func(args []reflect.Value) []reflect.Value {
 				for i, arg := range args {
@@ -47,7 +57,7 @@ func getFuncCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 				}
 				return outs
 			})
-			_, fnPtr, _ := unpackEface(to.Interface())
+			_, fnPtr := unpackEface(to.Interface())
 			*(*unsafe.Pointer)(toAddr) = fnPtr
 			return nil
 		}, false

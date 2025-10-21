@@ -145,6 +145,24 @@ func TestIfaceMapCast(t *testing.T) {
 	}
 }
 
+func TestNilAnyCast(t *testing.T) {
+	if v, err := Cast[any, *int](nil); err != nil || v != nil {
+		t.Fatal()
+	}
+	if v, err := Cast[any, chan any](nil); err != nil || v != nil {
+		t.Fatal()
+	}
+	if v, err := Cast[any, map[any]any](nil); err != nil || v != nil {
+		t.Fatal()
+	}
+	if v, err := Cast[any, error](nil); err != nil || v != nil {
+		t.Fatal()
+	}
+	if v, err := Cast[any, []any](nil); err != nil || v != nil {
+		t.Fatal()
+	}
+}
+
 func TestCast(t *testing.T) {
 	equalGroups := [][]any{
 		{
@@ -165,16 +183,16 @@ func TestCast(t *testing.T) {
 		{
 			ptr4(
 				struct {
-					v1 *int
-					v2 **string
+					V1 *int
+					V2 **string
 				}{ptr(1), ptr2("2")},
 			),
 			struct {
-				v1 ***string
-				v2 ****int
+				V1 ***string
+				V2 ****int
 			}{ptr3("1"), ptr4(2)},
-			map[string]int{"v1": 1, "v2": 2},
-			map[string]*string{"v1": ptr("1"), "v2": ptr("2")},
+			map[string]int{"V1": 1, "V2": 2},
+			map[string]*string{"V1": ptr("1"), "V2": ptr("2")},
 		},
 		{
 			struct {

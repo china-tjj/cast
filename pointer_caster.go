@@ -20,6 +20,12 @@ func getFinalElem(typ reflect.Type) (int, reflect.Type) {
 }
 
 func getPointerCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
+	if fromType == nil {
+		return func(fromAddr, toAddr unsafe.Pointer) error {
+			*(*unsafe.Pointer)(toAddr) = nil
+			return nil
+		}, false
+	}
 	switch fromType.Kind() {
 	case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
@@ -41,9 +47,7 @@ func getPointerCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) 
 				return func(fromAddr, toAddr unsafe.Pointer) error {
 					for d := toDepth - 1; d > fromDepth; d-- {
 						toPtr := (*unsafe.Pointer)(toAddr)
-						if *toPtr == nil {
-							*toPtr = unsafe.Pointer(new(unsafe.Pointer))
-						}
+						*toPtr = unsafe.Pointer(new(unsafe.Pointer))
 						toAddr = *toPtr
 					}
 					*(*unsafe.Pointer)(toAddr) = fromAddr
@@ -96,9 +100,7 @@ func getPointerCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) 
 			}
 			for d := toDepth; d > fromDepth; d-- {
 				toPtr := (*unsafe.Pointer)(toAddr)
-				if *toPtr == nil {
-					*toPtr = unsafe.Pointer(new(unsafe.Pointer))
-				}
+				*toPtr = unsafe.Pointer(new(unsafe.Pointer))
 				toAddr = *toPtr
 			}
 			for d := depth; d > 0; d-- {
@@ -107,12 +109,10 @@ func getPointerCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) 
 					return nil
 				}
 				toPtr := (*unsafe.Pointer)(toAddr)
-				if *toPtr == nil {
-					if d > 1 {
-						*toPtr = unsafe.Pointer(new(unsafe.Pointer))
-					} else {
-						*toPtr = newObject(toElemType)
-					}
+				if d > 1 {
+					*toPtr = unsafe.Pointer(new(unsafe.Pointer))
+				} else {
+					*toPtr = newObject(toElemType)
 				}
 				toAddr = *toPtr
 			}
@@ -150,9 +150,7 @@ func getNormalPtrCaster(s *Scope, fromType, toElemType reflect.Type) (castFunc, 
 	}
 	return func(fromAddr, toAddr unsafe.Pointer) error {
 		toPtr := (*unsafe.Pointer)(toAddr)
-		if *toPtr == nil {
-			*toPtr = newObject(toElemType)
-		}
+		*toPtr = newObject(toElemType)
 		return caster(fromAddr, *toPtr)
 	}, hasRef
 }

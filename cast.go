@@ -7,10 +7,47 @@ package cast
 
 import (
 	"reflect"
+	"sync"
 	"unsafe"
 )
 
+type Scope struct {
+	casterMap map[casterKey]casterValue
+	mu        sync.RWMutex // 读多写少的场景，sync.RWMutex的效率比sync.Map更高
+	frozen    bool
+
+	disableZeroCopy bool // 禁用零拷贝
+	deepCopy        bool // 深拷贝
+	castUnexported  bool // 转换未导出字段
+}
+
+func (s *Scope) DisableZeroCopy() bool {
+	return s.disableZeroCopy
+}
+
+type ScopeOption func(s *Scope)
+
+// NewScope 创建新的作用域
+func NewScope(options ...ScopeOption) *Scope {
+	scope := &Scope{
+		casterMap: make(map[casterKey]casterValue),
+	}
+	for _, option := range defaultOptions {
+		option(scope)
+	}
+	for _, option := range options {
+		option(scope)
+	}
+	scope.frozen = true
+	return scope
+}
+
 var defaultScope = NewScope()
+
+// SetDefaultScope ！！慎用！！设置默认作用域，可以改变默认行为
+func SetDefaultScope(s *Scope) {
+	defaultScope = s
+}
 
 // Cast 将类型F转为T，转换规则详见README
 func Cast[F any, T any](from F) (to T, err error) {
@@ -32,7 +69,7 @@ func CastWithScope[F any, T any](s *Scope, from F) (to T, err error) {
 	fromType, toType := typeFor[F](), typeFor[T]()
 	caster, _ := getCaster(s, fromType, toType)
 	if caster == nil {
-		return to, invalidCastErr(fromType, toType)
+		return to, invalidCastErr(s, fromType, toType)
 	}
 	// 当from包含指针时，这部分指针指向的内容会逃逸
 	escape(from)
@@ -45,7 +82,7 @@ func GetCasterWithScope[F any, T any](s *Scope) func(from F) (to T, err error) {
 	fromType, toType := typeFor[F](), typeFor[T]()
 	caster, _ := getCaster(s, fromType, toType)
 	if caster == nil {
-		e := invalidCastErr(fromType, toType)
+		e := invalidCastErr(s, fromType, toType)
 		return func(from F) (to T, err error) {
 			return to, e
 		}
@@ -60,13 +97,16 @@ func GetCasterWithScope[F any, T any](s *Scope) func(from F) (to T, err error) {
 
 // ReflectCastWithScope 以反射的方式，需输入待转换的值与要转换的类型
 func ReflectCastWithScope(s *Scope, from reflect.Value, toType reflect.Type) (to reflect.Value, err error) {
-	fromType := from.Type()
-	caster, _ := getCaster(s, fromType, toType)
-	if caster == nil {
-		return reflect.Value{}, invalidCastErr(fromType, toType)
+	if toType == nil {
+		return reflect.Value{}, nilToTypeErr
 	}
 	if !from.IsValid() {
 		return reflect.Zero(toType), nil
+	}
+	fromType := from.Type()
+	caster, _ := getCaster(s, fromType, toType)
+	if caster == nil {
+		return reflect.Value{}, invalidCastErr(s, fromType, toType)
 	}
 	toPtr := reflect.New(toType)
 	err = caster(getValueAddr(from), toPtr.UnsafePointer())
@@ -93,7 +133,7 @@ func WithCaster[F any, T any](caster func(s *Scope, from F) (to T, err error)) S
 	}
 }
 
-// WithDisableZeroCopy 禁用零拷贝，所有场景均会浅拷贝
+// WithDisableZeroCopy 禁用内存布局相同时零拷贝强转，但是类型相同时仍只会浅拷贝
 func WithDisableZeroCopy() ScopeOption {
 	return func(s *Scope) {
 		if s.frozen {
@@ -103,7 +143,22 @@ func WithDisableZeroCopy() ScopeOption {
 	}
 }
 
-// SetDefaultScope ！！慎用！！设置默认作用域，可以改变默认行为
-func SetDefaultScope(s *Scope) {
-	defaultScope = s
+// WithDeepCopy 所有转换强制深拷贝
+func WithDeepCopy() ScopeOption {
+	return func(s *Scope) {
+		if s.frozen {
+			return
+		}
+		s.deepCopy = true
+	}
+}
+
+// WithUnexportedFields 转换结构体的未导出字段
+func WithUnexportedFields() ScopeOption {
+	return func(s *Scope) {
+		if s.frozen {
+			return
+		}
+		s.castUnexported = true
+	}
 }

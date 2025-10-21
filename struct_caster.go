@@ -11,6 +11,9 @@ import (
 )
 
 func getStructCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
+	if fromType == nil {
+		return nil, false
+	}
 	switch fromType.Kind() {
 	case reflect.Interface:
 		return getUnpackInterfaceCaster(s, fromType, toType)
@@ -34,12 +37,15 @@ func getStructCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 		fieldOffsets := make([]uintptr, n)
 		fieldCasters := make([]castFunc, n)
 		fieldHasRefs := make([]bool, n)
+		fieldTypes := make([]reflect.Type, n)
 		for i := 0; i < n; i++ {
 			field := toType.Field(i)
-			caster, fieldHasRef := getCaster(s, fromElemType, field.Type)
-			if caster == nil {
+			if !s.castUnexported && !field.IsExported() {
 				continue
 			}
+			fieldOffsets[i] = field.Offset
+			fieldTypes[i] = field.Type
+			fieldCasters[i], fieldHasRefs[i] = getCaster(s, fromElemType, field.Type)
 			if jsonTag, ok := getDiffJsonTag(&field); ok {
 				jsonTagKey := newObject(fromKeyType)
 				if keyCaster(unsafe.Pointer(&jsonTag), jsonTagKey) == nil {
@@ -53,9 +59,6 @@ func getStructCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 			if jsonTagKeys[i] == nil && fieldKeys[i] == nil {
 				return nil, false
 			}
-			fieldOffsets[i] = field.Offset
-			fieldCasters[i] = caster
-			fieldHasRefs[i] = fieldHasRef
 		}
 		fromMapHelper := getMapHelper(fromType)
 		return func(fromAddr, toAddr unsafe.Pointer) error {
@@ -64,6 +67,9 @@ func getStructCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 				var err1, err2 error
 				if jsonTagKeys[i] != nil {
 					if v, ok := fromMapHelper.Load(from, jsonTagKeys[i], fieldHasRefs[i]); ok {
+						if fieldCasters[i] == nil {
+							return invalidCastErr(s, fromElemType, fieldTypes[i])
+						}
 						if err1 = fieldCasters[i](v, unsafe.Add(toAddr, fieldOffsets[i])); err1 == nil {
 							continue
 						}
@@ -71,6 +77,9 @@ func getStructCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 				}
 				if fieldKeys[i] != nil {
 					if v, ok := fromMapHelper.Load(from, fieldKeys[i], fieldHasRefs[i]); ok {
+						if fieldCasters[i] == nil {
+							return invalidCastErr(s, fromElemType, fieldTypes[i])
+						}
 						if err2 = fieldCasters[i](v, unsafe.Add(toAddr, fieldOffsets[i])); err2 == nil {
 							continue
 						}
@@ -100,6 +109,9 @@ func getStructCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 		fromFieldMap := make(map[string]reflect.StructField, nFrom)
 		for i := 0; i < nFrom; i++ {
 			field := fromType.Field(i)
+			if !s.castUnexported && !field.IsExported() {
+				continue
+			}
 			if jsonTag, ok := field.Tag.Lookup("json"); ok {
 				fromJsonTagMap[jsonTag] = field
 			}
@@ -123,6 +135,9 @@ func getStructCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 		hasRef := false
 		for i := 0; i < nTo; i++ {
 			toField := toType.Field(i)
+			if !s.castUnexported && !toField.IsExported() {
+				continue
+			}
 			fromField := getMappedField(&toField)
 			if fromField == nil {
 				continue
@@ -132,7 +147,7 @@ func getStructCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 			var fHasRef bool
 			casters[i], fHasRef = getCaster(s, fromField.Type, toField.Type)
 			if casters[i] == nil {
-				continue
+				return nil, false
 			}
 			casterCnt++
 			hasRef = hasRef || fHasRef

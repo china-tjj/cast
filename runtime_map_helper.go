@@ -192,11 +192,7 @@ func (h *runtimeMapHelper) Store(m map[any]any, key, value unsafe.Pointer) {
 
 func (h *runtimeMapHelper) Range(m map[any]any, f func(key, value unsafe.Pointer) bool, keyHasRef, valueHasRef bool) {
 	var iter hiter
-	mapiterinit(h.mapTypePtr, m, noEscapePtr(&iter))
-	for {
-		if iter.key == nil {
-			return
-		}
+	for mapiterinit(h.mapTypePtr, m, noEscapePtr(&iter)); iter.key != nil; mapiternext(noEscapePtr(&iter)) {
 		k, v := iter.key, iter.elem
 		if keyHasRef {
 			k = copyObject(h.keyType, k)
@@ -207,7 +203,6 @@ func (h *runtimeMapHelper) Range(m map[any]any, f func(key, value unsafe.Pointer
 		if !f(k, v) {
 			return
 		}
-		mapiternext(noEscapePtr(&iter))
 	}
 }
 

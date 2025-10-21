@@ -10,52 +10,23 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 	"unsafe"
 )
-
-type Scope struct {
-	casterMap       map[casterKey]casterValue
-	mu              sync.RWMutex // 读多写少的场景，sync.RWMutex的效率比sync.Map更高
-	disableZeroCopy bool         // 禁用零拷贝
-	frozen          bool
-}
-
-func (s *Scope) DisableZeroCopy() bool {
-	return s.disableZeroCopy
-}
-
-// NewScope 创建新的作用域
-func NewScope(options ...ScopeOption) *Scope {
-	scope := &Scope{
-		casterMap: make(map[casterKey]casterValue),
-	}
-	for _, option := range defaultOptions {
-		option(scope)
-	}
-	for _, option := range options {
-		option(scope)
-	}
-	scope.frozen = true
-	return scope
-}
 
 type casterKey struct {
 	fromTypePtr unsafe.Pointer
 	toTypePtr   unsafe.Pointer
 }
 
-// fromAddr, toAddr都不能为nil
+// fromAddr, toAddr都不能为 nil（fromType 为 nil 时允许 fromAddr 为 nil）
+// 不要求 toAddr 指向的内存为 0 值
 type castFunc func(fromAddr, toAddr unsafe.Pointer) error
 
 type casterValue struct {
 	caster castFunc
 	hasRef bool
 }
-
-type ScopeOption func(s *Scope)
 
 // 第二个返回值，表示 toAddr 指向的内存，是否存在直接或间指向「fromAddr 指向的内存」的指针。
 // 当存在且 fromAddr 指向的内容是只读时，需要在转换前将 fromAddr 指向的内容拷贝用于转换。
@@ -75,7 +46,12 @@ func getCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 }
 
 func newCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
-	if isRefAble(s, fromType, toType) {
+	// toType 不允许为空，不知道要转为什么
+	if toType == nil {
+		return nil, false
+	}
+	// fromType 允许为空，比如 any(nil) => (*int)(nil) 是合法的，此时在 UnpackInterfaceCaster 里拿到的 fromElemType 为 nil
+	if fromType != nil && isRefAble(s, fromType, toType) {
 		fromTypePtr := typePtr(fromType)
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			typedmemmove(fromTypePtr, toAddr, fromAddr)
@@ -111,6 +87,10 @@ func newCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 		return getNumberCaster[float32](s, fromType, toType)
 	case reflect.Float64:
 		return getNumberCaster[float64](s, fromType, toType)
+	case reflect.Complex64:
+		return getComplexCaster[complex64](s, fromType, toType)
+	case reflect.Complex128:
+		return getComplexCaster[complex128](s, fromType, toType)
 	case reflect.Array:
 		return getArrayCaster(s, fromType, toType)
 	case reflect.Chan:
@@ -176,47 +156,7 @@ func castStringToDuration(s *Scope, str string) (time.Duration, error) {
 	return time.Duration(v), err
 }
 
-func getAnyToTCaster[T any]() func(s *Scope, from any) (to T, err error) {
-	toType := typeFor[T]()
-	var unpackCasterPtr atomic.Pointer[castFunc]
-	return func(s *Scope, from any) (to T, err error) {
-		if t, ok := from.(T); ok {
-			return t, nil
-		}
-		var unpackCaster castFunc
-		ptr := unpackCasterPtr.Load()
-		if ptr == nil {
-			tmp, _ := getUnpackInterfaceCaster(s, anyType, toType)
-			unpackCasterPtr.Store(&tmp)
-			unpackCaster = tmp
-		} else {
-			unpackCaster = *ptr
-		}
-		err = unpackCaster(noEscape(unsafe.Pointer(&from)), noEscape(unsafe.Pointer(&to)))
-		return to, err
-	}
-}
-
 var defaultOptions = []ScopeOption{
 	WithCaster(castStringToTime),
 	WithCaster(castStringToDuration),
-	WithCaster(getAnyToTCaster[bool]()),
-	WithCaster(getAnyToTCaster[int]()),
-	WithCaster(getAnyToTCaster[int8]()),
-	WithCaster(getAnyToTCaster[int16]()),
-	WithCaster(getAnyToTCaster[int32]()),
-	WithCaster(getAnyToTCaster[int64]()),
-	WithCaster(getAnyToTCaster[uint]()),
-	WithCaster(getAnyToTCaster[uint8]()),
-	WithCaster(getAnyToTCaster[uint16]()),
-	WithCaster(getAnyToTCaster[uint32]()),
-	WithCaster(getAnyToTCaster[uint64]()),
-	WithCaster(getAnyToTCaster[uintptr]()),
-	WithCaster(getAnyToTCaster[float32]()),
-	WithCaster(getAnyToTCaster[float64]()),
-	WithCaster(getAnyToTCaster[string]()),
-	WithCaster(getAnyToTCaster[[]byte]()),
-	WithCaster(getAnyToTCaster[[]rune]()),
-	WithCaster(getAnyToTCaster[map[string]any]()),
-	WithCaster(getAnyToTCaster[[]any]()),
 }

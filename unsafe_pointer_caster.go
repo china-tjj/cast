@@ -11,6 +11,12 @@ import (
 )
 
 func getUnsafePointerCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
+	if fromType == nil {
+		return func(fromAddr, toAddr unsafe.Pointer) error {
+			*(*[]any)(toAddr) = nil
+			return nil
+		}, false
+	}
 	switch fromType.Kind() {
 	case reflect.Uintptr:
 		return func(fromAddr, toAddr unsafe.Pointer) error {

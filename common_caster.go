@@ -7,19 +7,149 @@ package cast
 
 import (
 	"reflect"
+	"sync"
 	"unsafe"
 )
 
+type fastEfaceUnpacker func(from any, toAddr unsafe.Pointer) (error, bool)
+
+var unpackerNewerMap = make(map[unsafe.Pointer]func(s *Scope) fastEfaceUnpacker)
+
+func registerFastEFaceUnpacker[T any]() {
+	toType := typeFor[T]()
+	isSimple := !isRefType(toType)
+	unpackerNewerMap[typePtr(toType)] = func(s *Scope) fastEfaceUnpacker {
+		if !s.deepCopy || isSimple {
+			return func(from any, toAddr unsafe.Pointer) (error, bool) {
+				var ok bool
+				*(*T)(toAddr), ok = from.(T)
+				return nil, ok
+			}
+		}
+
+		copier, _ := getCaster(s, toType, toType)
+		if copier == nil {
+			err := invalidCastErr(s, toType, toType)
+			return func(from any, toAddr unsafe.Pointer) (error, bool) {
+				_, ok := from.(T)
+				if !ok {
+					return nil, false
+				}
+				return err, true
+			}
+		}
+		return func(from any, toAddr unsafe.Pointer) (error, bool) {
+			to, ok := from.(T)
+			if !ok {
+				return nil, false
+			}
+			return copier(noEscape(unsafe.Pointer(&to)), toAddr), true
+		}
+	}
+}
+
+func getFastEFaceUnpacker(s *Scope, toType reflect.Type) fastEfaceUnpacker {
+	if newer := unpackerNewerMap[typePtr(toType)]; newer != nil {
+		return newer(s)
+	}
+	return nil
+}
+
+func init() {
+	registerFastEFaceUnpacker[bool]()
+	registerFastEFaceUnpacker[int]()
+	registerFastEFaceUnpacker[int8]()
+	registerFastEFaceUnpacker[int16]()
+	registerFastEFaceUnpacker[int32]()
+	registerFastEFaceUnpacker[int64]()
+	registerFastEFaceUnpacker[uint]()
+	registerFastEFaceUnpacker[uint8]()
+	registerFastEFaceUnpacker[uint16]()
+	registerFastEFaceUnpacker[uint32]()
+	registerFastEFaceUnpacker[uint64]()
+	registerFastEFaceUnpacker[uintptr]()
+	registerFastEFaceUnpacker[float32]()
+	registerFastEFaceUnpacker[float64]()
+	registerFastEFaceUnpacker[string]()
+	registerFastEFaceUnpacker[[]byte]()
+	registerFastEFaceUnpacker[[]rune]()
+	registerFastEFaceUnpacker[map[string]any]()
+	registerFastEFaceUnpacker[[]any]()
+}
+
+const cacheSize = 8
+
+type cache struct {
+	mu     sync.RWMutex
+	keys   [cacheSize]casterKey
+	values [cacheSize]casterValue
+	n      int
+}
+
+func (c *cache) load(key casterKey) (casterValue, bool) {
+	if !c.mu.TryRLock() {
+		return casterValue{}, false
+	}
+	defer c.mu.RUnlock()
+	n := min(cacheSize, c.n)
+	for i := 0; i < n; i++ {
+		if c.keys[i] == key {
+			return c.values[i], true
+		}
+	}
+	return casterValue{}, false
+}
+
+func (c *cache) store(key casterKey, value casterValue) {
+	if !c.mu.TryLock() {
+		return
+	}
+	defer c.mu.Unlock()
+	n := min(cacheSize, c.n)
+	for i := 0; i < n; i++ {
+		if c.keys[i] == key {
+			c.values[i] = value
+			return
+		}
+	}
+	i := c.n % cacheSize
+	c.keys[i] = key
+	c.values[i] = value
+	c.n++
+	if c.n > 2*cacheSize {
+		c.n -= cacheSize
+	}
+}
+
 func getUnpackInterfaceCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 	fromTypeNumMethod := fromType.NumMethod()
+	fastUnpacker := getFastEFaceUnpacker(s, toType)
+	// 每次拆箱后都需动态查 map 获取 caster，略微有点慢，加一层 cache
+	var c cache
 	return func(fromAddr, toAddr unsafe.Pointer) error {
-		fromElemType, fromElemAddr, isPtr := unpackInterface(fromTypeNumMethod, fromAddr)
-		elemCaster, elemHasRef := getCaster(s, fromElemType, toType)
+		from := loadEface(fromTypeNumMethod, fromAddr)
+		if fastUnpacker != nil {
+			if err, ok := fastUnpacker(from, toAddr); ok {
+				return err
+			}
+		}
+		fromElemTypePtr, fromElemAddr := unpackEface(from)
+		fromElemType := typePtrToType(fromElemTypePtr)
+		key := casterKey{fromTypePtr: fromElemTypePtr, toTypePtr: typePtr(toType)}
+		var elemCaster castFunc
+		var elemHasRef bool
+		if value, ok := c.load(key); ok {
+			elemCaster, elemHasRef = value.caster, value.hasRef
+		} else {
+			elemCaster, elemHasRef = getCaster(s, fromElemType, toType)
+			value = casterValue{caster: elemCaster, hasRef: elemHasRef}
+			c.store(key, value)
+		}
 		if elemCaster == nil {
-			return invalidCastErr(fromElemType, toType)
+			return invalidCastErr(s, fromElemType, toType)
 		}
 		trueFromElemAddr := fromElemAddr
-		if isPtr {
+		if isPtrType(fromElemType) {
 			// 接口存指针时，eface 的指针会指针拷贝这个指针，故需要再取一次地址
 			trueFromElemAddr = noEscape(unsafe.Pointer(&fromElemAddr))
 		} else if elemHasRef {

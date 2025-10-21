@@ -65,15 +65,15 @@ func getHelperList(keyType reflect.Type) *[helperMaxSize + 1]iMapHelper {
 }
 
 func getMapHelper(mapType reflect.Type) iMapHelper {
-	helperList := getHelperList(mapType.Key())
-	if helperList != nil {
-		valueSize := mapType.Elem().Size()
-		if valueSize <= helperMaxSize {
-			if helper := helperList[valueSize]; helper != nil {
-				return helper
-			}
-		}
-	}
+	//helperList := getHelperList(mapType.Key())
+	//if helperList != nil {
+	//	valueSize := mapType.Elem().Size()
+	//	if valueSize <= helperMaxSize {
+	//		if helper := helperList[valueSize]; helper != nil {
+	//			return helper
+	//		}
+	//	}
+	//}
 	return newReflectMapHelper(mapType)
 }
 

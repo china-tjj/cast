@@ -11,11 +11,14 @@ import (
 	"unsafe"
 )
 
-type Number interface {
+type iNumber interface {
 	~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr | ~float32 | ~float64
 }
 
-func getNumberCaster[T Number](s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
+func getNumberCaster[T iNumber](s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
+	if fromType == nil {
+		return nil, false
+	}
 	switch fromType.Kind() {
 	case reflect.Bool:
 		return func(fromAddr, toAddr unsafe.Pointer) error {
@@ -102,10 +105,11 @@ func getNumberCaster[T Number](s *Scope, fromType, toType reflect.Type) (castFun
 			return nil
 		}, false
 	case reflect.String:
+		toBitSize := int(8 * toType.Size())
 		switch toType.Kind() {
 		case reflect.Float32, reflect.Float64:
 			return func(fromAddr, toAddr unsafe.Pointer) error {
-				f64, err := strconv.ParseFloat(*(*string)(fromAddr), 10)
+				f64, err := strconv.ParseFloat(*(*string)(fromAddr), toBitSize)
 				if err != nil {
 					return err
 				}
@@ -114,7 +118,7 @@ func getNumberCaster[T Number](s *Scope, fromType, toType reflect.Type) (castFun
 			}, false
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 			return func(fromAddr, toAddr unsafe.Pointer) error {
-				i64, err := strconv.ParseInt(*(*string)(fromAddr), 10, 64)
+				i64, err := strconv.ParseInt(*(*string)(fromAddr), 10, toBitSize)
 				if err != nil {
 					return err
 				}
@@ -123,7 +127,7 @@ func getNumberCaster[T Number](s *Scope, fromType, toType reflect.Type) (castFun
 			}, false
 		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 			return func(fromAddr, toAddr unsafe.Pointer) error {
-				ui64, err := strconv.ParseUint(*(*string)(fromAddr), 10, 64)
+				ui64, err := strconv.ParseUint(*(*string)(fromAddr), 10, toBitSize)
 				if err != nil {
 					return err
 				}

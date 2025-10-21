@@ -11,6 +11,17 @@ import (
 )
 
 func getFallbackInterfaceCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
+	if s.deepCopy {
+		copier, _ := getCaster(s, fromType, fromType)
+		return func(fromAddr, toAddr unsafe.Pointer) error {
+			copied := newObject(fromType)
+			if err := copier(fromAddr, copied); err != nil {
+				return err
+			}
+			reflect.NewAt(toType, toAddr).Elem().Set(reflect.NewAt(fromType, copied).Elem())
+			return nil
+		}, false
+	}
 	return func(fromAddr, toAddr unsafe.Pointer) error {
 		reflect.NewAt(toType, toAddr).Elem().Set(reflect.NewAt(fromType, fromAddr).Elem())
 		return nil
@@ -18,6 +29,12 @@ func getFallbackInterfaceCaster(s *Scope, fromType, toType reflect.Type) (castFu
 }
 
 func getInterfaceCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
+	if fromType == nil {
+		return func(fromAddr, toAddr unsafe.Pointer) error {
+			*(*any)(toAddr) = nil
+			return nil
+		}, false
+	}
 	fromKind := fromType.Kind()
 	if toType.NumMethod() == 0 {
 		switch fromKind {
@@ -92,6 +109,10 @@ func getInterfaceCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool
 				return nil
 			}, false
 		case reflect.Interface:
+			if s.deepCopy {
+				copier, _ := getUnpackInterfaceCaster(s, fromType, toType)
+				return copier, false
+			}
 			if fromType.NumMethod() == 0 {
 				return func(fromAddr, toAddr unsafe.Pointer) error {
 					*(*any)(toAddr) = *(*any)(fromAddr)
@@ -110,7 +131,37 @@ func getInterfaceCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool
 				return nil
 			}, false
 		default:
-			return getFallbackInterfaceCaster(s, fromType, toType)
+			if s.deepCopy {
+				copier, _ := getCaster(s, fromType, fromType)
+				if isPtrType(fromType) {
+					return func(fromAddr, toAddr unsafe.Pointer) error {
+						copied := newObject(fromType)
+						if err := copier(fromAddr, copied); err != nil {
+							return err
+						}
+						*(*any)(toAddr) = packEface(fromType, *(*unsafe.Pointer)(copied))
+						return nil
+					}, false
+				}
+				return func(fromAddr, toAddr unsafe.Pointer) error {
+					copied := newObject(fromType)
+					if err := copier(fromAddr, copied); err != nil {
+						return err
+					}
+					*(*any)(toAddr) = packEface(fromType, copied)
+					return nil
+				}, false
+			}
+			if isPtrType(fromType) {
+				return func(fromAddr, toAddr unsafe.Pointer) error {
+					*(*any)(toAddr) = packEface(fromType, *(*unsafe.Pointer)(fromAddr))
+					return nil
+				}, false
+			}
+			return func(fromAddr, toAddr unsafe.Pointer) error {
+				*(*any)(toAddr) = packEface(fromType, fromAddr)
+				return nil
+			}, true
 		}
 	}
 

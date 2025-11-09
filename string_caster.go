@@ -13,21 +13,15 @@ import (
 )
 
 func getStringCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
-	if fromType == nil {
-		return nil, false
-	}
 	if fromType.Implements(stringerType) {
 		fromTypeIsPtr := isPtrType(fromType)
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			if fromTypeIsPtr {
 				fromAddr = *(*unsafe.Pointer)(fromAddr)
-				if fromAddr == nil {
-					return nilPtrErr
-				}
 			}
 			from, _ := packEface(fromType, fromAddr).(fmt.Stringer)
 			if from == nil {
-				return nilStringerErr
+				return NilStringerErr
 			}
 			*(*string)(toAddr) = from.String()
 			return nil

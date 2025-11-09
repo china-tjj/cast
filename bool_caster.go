@@ -12,9 +12,6 @@ import (
 )
 
 func getBoolCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
-	if fromType == nil {
-		return nil, false
-	}
 	switch fromType.Kind() {
 	case reflect.Bool:
 		return func(fromAddr, toAddr unsafe.Pointer) error {

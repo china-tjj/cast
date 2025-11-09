@@ -12,6 +12,13 @@ import (
 	"unsafe"
 )
 
+type iMapHelper interface {
+	Make(mapAddr unsafe.Pointer, n int) map[any]any
+	Load(m map[any]any, key unsafe.Pointer, valueHasRef bool) (value unsafe.Pointer, ok bool)
+	Store(m map[any]any, key, value unsafe.Pointer)
+	Range(m map[any]any, f func(key, value unsafe.Pointer) bool, keyHasRef, valueHasRef bool)
+}
+
 const helperMaxSize = 24
 
 // 特殊hash规则
@@ -65,15 +72,15 @@ func getHelperList(keyType reflect.Type) *[helperMaxSize + 1]iMapHelper {
 }
 
 func getMapHelper(mapType reflect.Type) iMapHelper {
-	//helperList := getHelperList(mapType.Key())
-	//if helperList != nil {
-	//	valueSize := mapType.Elem().Size()
-	//	if valueSize <= helperMaxSize {
-	//		if helper := helperList[valueSize]; helper != nil {
-	//			return helper
-	//		}
-	//	}
-	//}
+	helperList := getHelperList(mapType.Key())
+	if helperList != nil {
+		valueSize := mapType.Elem().Size()
+		if valueSize <= helperMaxSize {
+			if helper := helperList[valueSize]; helper != nil {
+				return helper
+			}
+		}
+	}
 	return newReflectMapHelper(mapType)
 }
 

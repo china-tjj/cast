@@ -46,12 +46,8 @@ func getCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 }
 
 func newCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
-	// toType 不允许为空，不知道要转为什么
-	if toType == nil {
-		return nil, false
-	}
-	// fromType 允许为空，比如 any(nil) => (*int)(nil) 是合法的，此时在 UnpackInterfaceCaster 里拿到的 fromElemType 为 nil
-	if fromType != nil && isRefAble(s, fromType, toType) {
+	// 内存布局相同，直接强转
+	if isRefAble(s, fromType, toType) {
 		fromTypePtr := typePtr(fromType)
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			typedmemmove(fromTypePtr, toAddr, fromAddr)

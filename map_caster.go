@@ -12,12 +12,6 @@ import (
 )
 
 func getMapCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
-	if fromType == nil {
-		return func(fromAddr, toAddr unsafe.Pointer) error {
-			*(*map[any]any)(toAddr) = nil
-			return nil
-		}, false
-	}
 	switch fromType.Kind() {
 	case reflect.Interface:
 		return getUnpackInterfaceCaster(s, fromType, toType)
@@ -43,6 +37,7 @@ func getMapCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			from := *(*map[any]any)(fromAddr)
 			if from == nil {
+				*(*map[any]any)(toAddr) = nil
 				return nil
 			}
 			to := toMapHelper.Make(toAddr, len(from))
@@ -88,24 +83,15 @@ func getMapCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 				return nil
 			}, false
 		}
-		jsonTags := make([]string, n)
-		fieldNames := make([]string, n)
-		fieldKeys := make([]unsafe.Pointer, n)
-		fieldCasters := make([]castFunc, n)
-		fieldOffsets := make([]uintptr, n)
-
-		newMapKey := func(i int) (unsafe.Pointer, error) {
-			k := newObject(toKeyType)
-			if jsonTags[i] != "" && keyCaster(unsafe.Pointer(&jsonTags[i]), k) == nil {
-				return k, nil
-			}
-			if err := keyCaster(unsafe.Pointer(&fieldNames[i]), k); err != nil {
-				return nil, err
-			}
-			return k, nil
+		type medaData struct {
+			strKey      string
+			fieldKey    unsafe.Pointer
+			fieldCaster castFunc
+			fieldOffset uintptr
 		}
-
+		data := make([]medaData, n)
 		hasRef := false
+		keyIsStr := toKeyType.Kind() == reflect.String
 		keyIsRefType := isRefType(toKeyType)
 		for i := 0; i < n; i++ {
 			field := fromType.Field(i)
@@ -113,20 +99,21 @@ func getMapCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 				continue
 			}
 			var fHasRef bool
-			fieldCasters[i], fHasRef = getCaster(s, field.Type, toElemType)
-			if fieldCasters[i] == nil {
+			data[i].fieldCaster, fHasRef = getCaster(s, field.Type, toElemType)
+			if data[i].fieldCaster == nil {
 				return nil, false
 			}
-			jsonTags[i], _ = getDiffJsonTag(&field)
-			fieldNames[i] = field.Name
-			if !keyIsRefType {
-				k, err := newMapKey(i)
-				if err != nil {
+			data[i].strKey = field.Name
+			if jsonTag, ok := field.Tag.Lookup("json"); ok {
+				data[i].strKey = jsonTag
+			}
+			if !keyIsStr && !keyIsRefType {
+				data[i].fieldKey = newObject(toKeyType)
+				if err := keyCaster(unsafe.Pointer(&data[i].strKey), data[i].fieldKey); err != nil {
 					return nil, false
 				}
-				fieldKeys[i] = k
 			}
-			fieldOffsets[i] = field.Offset
+			data[i].fieldOffset = field.Offset
 			hasRef = hasRef || fHasRef
 		}
 		// 小优化，减少堆内存分配
@@ -142,19 +129,21 @@ func getMapCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 				v = newObject(toElemType)
 			}
 			for i := 0; i < n; i++ {
-				if fieldCasters[i] == nil {
+				if data[i].fieldCaster == nil {
 					continue
 				}
 				var k unsafe.Pointer
-				if keyIsRefType {
-					var err error
-					if k, err = newMapKey(i); err != nil {
+				if keyIsStr {
+					k = unsafe.Pointer(&data[i].strKey)
+				} else if keyIsRefType {
+					k = newObject(toKeyType)
+					if err := keyCaster(unsafe.Pointer(&data[i].strKey), k); err != nil {
 						return err
 					}
 				} else {
-					k = fieldKeys[i]
+					k = data[i].fieldKey
 				}
-				if err := fieldCasters[i](unsafe.Add(fromAddr, fieldOffsets[i]), v); err != nil {
+				if err := data[i].fieldCaster(unsafe.Add(fromAddr, data[i].fieldOffset), v); err != nil {
 					return err
 				}
 				toMapHelper.Store(to, k, v)

@@ -11,12 +11,6 @@ import (
 )
 
 func getFuncCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
-	if fromType == nil {
-		return func(fromAddr, toAddr unsafe.Pointer) error {
-			*(*func())(toAddr) = nil
-			return nil
-		}, false
-	}
 	switch fromType.Kind() {
 	case reflect.Func:
 		numIn := fromType.NumIn()

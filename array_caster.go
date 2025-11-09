@@ -11,9 +11,6 @@ import (
 )
 
 func getArrayCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
-	if fromType == nil {
-		return nil, false
-	}
 	switch fromType.Kind() {
 	case reflect.Array:
 		fromElemType := fromType.Elem()

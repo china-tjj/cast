@@ -11,9 +11,6 @@ type iComplex interface {
 }
 
 func getComplexCaster[T iComplex](s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
-	if fromType == nil {
-		return nil, false
-	}
 	switch fromType.Kind() {
 	case reflect.Complex64:
 		return func(fromAddr, toAddr unsafe.Pointer) error {

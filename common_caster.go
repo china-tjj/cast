@@ -11,70 +11,26 @@ import (
 	"unsafe"
 )
 
-type fastEfaceUnpacker func(from any, toAddr unsafe.Pointer) (error, bool)
-
-var unpackerNewerMap = make(map[unsafe.Pointer]func(s *Scope) fastEfaceUnpacker)
-
-func registerFastEFaceUnpacker[T any]() {
-	toType := typeFor[T]()
-	isSimple := !isRefType(toType)
-	unpackerNewerMap[typePtr(toType)] = func(s *Scope) fastEfaceUnpacker {
-		if !s.deepCopy || isSimple {
-			return func(from any, toAddr unsafe.Pointer) (error, bool) {
-				var ok bool
-				*(*T)(toAddr), ok = from.(T)
-				return nil, ok
-			}
-		}
-
-		copier, _ := getCaster(s, toType, toType)
-		if copier == nil {
-			err := invalidCastErr(s, toType, toType)
-			return func(from any, toAddr unsafe.Pointer) (error, bool) {
-				_, ok := from.(T)
-				if !ok {
-					return nil, false
-				}
-				return err, true
-			}
-		}
-		return func(from any, toAddr unsafe.Pointer) (error, bool) {
-			to, ok := from.(T)
-			if !ok {
-				return nil, false
-			}
-			return copier(noEscape(unsafe.Pointer(&to)), toAddr), true
-		}
-	}
-}
-
-func getFastEFaceUnpacker(s *Scope, toType reflect.Type) fastEfaceUnpacker {
-	if newer := unpackerNewerMap[typePtr(toType)]; newer != nil {
-		return newer(s)
-	}
-	return nil
-}
-
 func init() {
-	registerFastEFaceUnpacker[bool]()
-	registerFastEFaceUnpacker[int]()
-	registerFastEFaceUnpacker[int8]()
-	registerFastEFaceUnpacker[int16]()
-	registerFastEFaceUnpacker[int32]()
-	registerFastEFaceUnpacker[int64]()
-	registerFastEFaceUnpacker[uint]()
-	registerFastEFaceUnpacker[uint8]()
-	registerFastEFaceUnpacker[uint16]()
-	registerFastEFaceUnpacker[uint32]()
-	registerFastEFaceUnpacker[uint64]()
-	registerFastEFaceUnpacker[uintptr]()
-	registerFastEFaceUnpacker[float32]()
-	registerFastEFaceUnpacker[float64]()
-	registerFastEFaceUnpacker[string]()
-	registerFastEFaceUnpacker[[]byte]()
-	registerFastEFaceUnpacker[[]rune]()
-	registerFastEFaceUnpacker[map[string]any]()
-	registerFastEFaceUnpacker[[]any]()
+	registerFastInterfaceCaster[bool]()
+	registerFastInterfaceCaster[int]()
+	registerFastInterfaceCaster[int8]()
+	registerFastInterfaceCaster[int16]()
+	registerFastInterfaceCaster[int32]()
+	registerFastInterfaceCaster[int64]()
+	registerFastInterfaceCaster[uint]()
+	registerFastInterfaceCaster[uint8]()
+	registerFastInterfaceCaster[uint16]()
+	registerFastInterfaceCaster[uint32]()
+	registerFastInterfaceCaster[uint64]()
+	registerFastInterfaceCaster[uintptr]()
+	registerFastInterfaceCaster[float32]()
+	registerFastInterfaceCaster[float64]()
+	registerFastInterfaceCaster[string]()
+	registerFastInterfaceCaster[[]byte]()
+	registerFastInterfaceCaster[[]rune]()
+	registerFastInterfaceCaster[map[string]any]()
+	registerFastInterfaceCaster[[]any]()
 }
 
 const cacheSize = 8
@@ -121,54 +77,132 @@ func (c *cache) store(key casterKey, value casterValue) {
 	}
 }
 
-func getUnpackInterfaceCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
-	fromTypeNumMethod := fromType.NumMethod()
-	fastUnpacker := getFastEFaceUnpacker(s, toType)
-	// 每次拆箱后都需动态查 map 获取 caster，略微有点慢，加一层 cache
-	var c cache
+// 不用闭包，手动封装结构体，以支持内联
+type interfaceCastHandler struct {
+	s                 *Scope
+	c                 cache // 每次拆箱后都需动态查 map 获取 caster，略微有点慢，加一层 cache
+	fromType          reflect.Type
+	toType            reflect.Type
+	fromTypeNumMethod int
+	toTypePtr         unsafe.Pointer
+	toTypeIsNilable   bool
+	toZeroPtr         unsafe.Pointer
+}
+
+func newInterfaceCastHandler(s *Scope, fromType, toType reflect.Type) *interfaceCastHandler {
+	return &interfaceCastHandler{
+		s:                 s,
+		fromType:          fromType,
+		toType:            toType,
+		fromTypeNumMethod: fromType.NumMethod(),
+		toTypePtr:         typePtr(toType),
+		toTypeIsNilable:   isNilableType(toType),
+		toZeroPtr:         getZeroPtr(toType),
+	}
+}
+
+func (handler *interfaceCastHandler) normalCast(from any, toAddr unsafe.Pointer) error {
+	fromElemTypePtr, fromElemAddr := unpackEface(from)
+	fromElemType := typePtrToType(fromElemTypePtr)
+	if fromElemTypePtr == nil {
+		if handler.s.strictNilCheck && !handler.toTypeIsNilable {
+			return invalidCastErr(handler.s, fromElemType, handler.toType)
+		}
+		typedmemmove(handler.toTypePtr, toAddr, handler.toZeroPtr)
+		return nil
+	}
+	key := casterKey{fromTypePtr: fromElemTypePtr, toTypePtr: handler.toTypePtr}
+	var elemCaster castFunc
+	var elemHasRef bool
+	if value, ok := handler.c.load(key); ok {
+		elemCaster, elemHasRef = value.caster, value.hasRef
+	} else {
+		elemCaster, elemHasRef = getCaster(handler.s, fromElemType, handler.toType)
+		value = casterValue{caster: elemCaster, hasRef: elemHasRef}
+		handler.c.store(key, value)
+	}
+	if elemCaster == nil {
+		return invalidCastErr(handler.s, fromElemType, handler.toType)
+	}
+	trueFromElemAddr := fromElemAddr
+	if isPtrType(fromElemType) {
+		// 接口存指针时，eface 的指针会指针拷贝这个指针，故需要再取一次地址
+		trueFromElemAddr = noEscape(unsafe.Pointer(&fromElemAddr))
+	} else if elemHasRef {
+		// 接口存非指针时，eface 的指针指向的内存是只读的，若有指针指向该块内存，需拷贝
+		trueFromElemAddr = copyObject(fromElemType, trueFromElemAddr)
+	}
+	return elemCaster(trueFromElemAddr, toAddr)
+}
+
+func (handler *interfaceCastHandler) getCaster() castFunc {
+	if newer := fastInterfaceCasterNewerMap[handler.toTypePtr]; newer != nil {
+		return newer(handler)
+	}
 	return func(fromAddr, toAddr unsafe.Pointer) error {
-		from := loadEface(fromTypeNumMethod, fromAddr)
-		if fastUnpacker != nil {
-			if err, ok := fastUnpacker(from, toAddr); ok {
-				return err
+		return handler.normalCast(loadEface(handler.fromTypeNumMethod, fromAddr), toAddr)
+	}
+}
+
+var fastInterfaceCasterNewerMap = make(map[unsafe.Pointer]func(handler *interfaceCastHandler) castFunc)
+
+func registerFastInterfaceCaster[T any]() {
+	toType := typeFor[T]()
+	isSimple := !isRefType(toType)
+	fastInterfaceCasterNewerMap[typePtr(toType)] = func(handler *interfaceCastHandler) castFunc {
+		if !handler.s.deepCopy || isSimple {
+			return func(fromAddr, toAddr unsafe.Pointer) error {
+				from := loadEface(handler.fromTypeNumMethod, fromAddr)
+				var ok bool
+				if *(*T)(toAddr), ok = from.(T); ok {
+					return nil
+				}
+				return handler.normalCast(from, toAddr)
 			}
 		}
-		fromElemTypePtr, fromElemAddr := unpackEface(from)
-		fromElemType := typePtrToType(fromElemTypePtr)
-		key := casterKey{fromTypePtr: fromElemTypePtr, toTypePtr: typePtr(toType)}
-		var elemCaster castFunc
-		var elemHasRef bool
-		if value, ok := c.load(key); ok {
-			elemCaster, elemHasRef = value.caster, value.hasRef
-		} else {
-			elemCaster, elemHasRef = getCaster(s, fromElemType, toType)
-			value = casterValue{caster: elemCaster, hasRef: elemHasRef}
-			c.store(key, value)
+		copier, _ := getCaster(handler.s, toType, toType)
+		if copier == nil {
+			err := invalidCastErr(handler.s, toType, toType)
+			return func(fromAddr, toAddr unsafe.Pointer) error {
+				from := loadEface(handler.fromTypeNumMethod, fromAddr)
+				if _, ok := from.(T); ok {
+					return err
+				}
+				return handler.normalCast(from, toAddr)
+			}
 		}
-		if elemCaster == nil {
-			return invalidCastErr(s, fromElemType, toType)
+		return func(fromAddr, toAddr unsafe.Pointer) error {
+			from := loadEface(handler.fromTypeNumMethod, fromAddr)
+			if to, ok := from.(T); ok {
+				return copier(noEscape(unsafe.Pointer(&to)), toAddr)
+			}
+			return handler.normalCast(from, toAddr)
 		}
-		trueFromElemAddr := fromElemAddr
-		if isPtrType(fromElemType) {
-			// 接口存指针时，eface 的指针会指针拷贝这个指针，故需要再取一次地址
-			trueFromElemAddr = noEscape(unsafe.Pointer(&fromElemAddr))
-		} else if elemHasRef {
-			// 接口存非指针时，eface 的指针指向的内存是只读的，若有指针指向该块内存，需拷贝
-			trueFromElemAddr = copyObject(fromElemType, trueFromElemAddr)
-		}
-		return elemCaster(trueFromElemAddr, toAddr)
-	}, false
+	}
+}
+
+func getUnpackInterfaceCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
+	return newInterfaceCastHandler(s, fromType, toType).getCaster(), false
 }
 
 func getAddressingPointerCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
-	elemCaster, _ := getCaster(s, fromType.Elem(), toType)
+	depth, finalElemType := getFinalElem(fromType)
+	elemCaster, _ := getCaster(s, finalElemType, toType)
 	if elemCaster == nil {
 		return nil, false
 	}
+	zeroPtr := getZeroPtr(toType)
+	toTypeIsNilable := isNilableType(toType)
 	return func(fromAddr, toAddr unsafe.Pointer) error {
-		fromAddr = *(*unsafe.Pointer)(fromAddr)
-		if fromAddr == nil {
-			return nilPtrErr
+		for i := depth; i > 0; i-- {
+			fromAddr = *(*unsafe.Pointer)(fromAddr)
+			if fromAddr == nil {
+				if s.strictNilCheck && !toTypeIsNilable {
+					return NilPtrErr
+				}
+				typedmemmove(typePtr(toType), toAddr, zeroPtr)
+				return nil
+			}
 		}
 		return elemCaster(fromAddr, toAddr)
 	}, false

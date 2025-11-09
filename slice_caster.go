@@ -11,12 +11,6 @@ import (
 )
 
 func getSliceCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
-	if fromType == nil {
-		return func(fromAddr, toAddr unsafe.Pointer) error {
-			*(*[]any)(toAddr) = nil
-			return nil
-		}, false
-	}
 	switch fromType.Kind() {
 	case reflect.Array:
 		fromElemType := fromType.Elem()

@@ -11,15 +11,28 @@ import (
 	"reflect"
 )
 
-var nilToTypeErr = errors.New("to type is <nil>")
-var nilPtrErr = errors.New("can't address nil pointer")
-var nilStringerErr = errors.New("stringer is nil")
+type strErr string
+
+func (e strErr) Error() string {
+	return string(e)
+}
+
+const NilToTypeErr = strErr("to type is <nil>")
+const NilPtrErr = strErr("can't address nil pointer")
+const NilStringerErr = strErr("stringer is nil")
 
 func invalidCastErr(s *Scope, fromType, toType reflect.Type) error {
 	if s.deepCopy && fromType == toType {
-		return errors.New("invalid deep copy: can't deep copy type 「" + fromType.String() + "」")
+		return errors.New("invalid deep copy: can't deep copy type <" + getTypeString(fromType) + ">")
 	}
-	return errors.New("invalid cast: can't cast type 「" + fromType.String() + "」 to 「" + toType.String() + "」")
+	return errors.New("invalid cast: can't cast type <" + getTypeString(fromType) + "> to <" + getTypeString(toType) + ">")
+}
+
+func getTypeString(typ reflect.Type) string {
+	if typ == nil {
+		return "nil"
+	}
+	return typ.String()
 }
 
 var (
@@ -27,4 +40,5 @@ var (
 	bytesType    = typeFor[[]byte]()
 	runesType    = typeFor[[]rune]()
 	stringerType = typeFor[fmt.Stringer]()
+	byteType     = typeFor[byte]()
 )

@@ -19,6 +19,7 @@ type Scope struct {
 	disableZeroCopy bool // 禁用零拷贝
 	deepCopy        bool // 深拷贝
 	castUnexported  bool // 转换未导出字段
+	strictNilCheck  bool // 仅允许 nil 转为可以为 nil 的类型
 }
 
 func (s *Scope) DisableZeroCopy() bool {
@@ -98,9 +99,12 @@ func GetCasterWithScope[F any, T any](s *Scope) func(from F) (to T, err error) {
 // ReflectCastWithScope 以反射的方式，需输入待转换的值与要转换的类型
 func ReflectCastWithScope(s *Scope, from reflect.Value, toType reflect.Type) (to reflect.Value, err error) {
 	if toType == nil {
-		return reflect.Value{}, nilToTypeErr
+		return reflect.Value{}, NilToTypeErr
 	}
 	if !from.IsValid() {
+		if s.strictNilCheck && !isNilableType(toType) {
+			return reflect.Value{}, invalidCastErr(s, nil, toType)
+		}
 		return reflect.Zero(toType), nil
 	}
 	fromType := from.Type()
@@ -160,5 +164,15 @@ func WithUnexportedFields() ScopeOption {
 			return
 		}
 		s.castUnexported = true
+	}
+}
+
+// WithStrictNilCheck 仅允许 nil 转为可以为 nil 的类型
+func WithStrictNilCheck() ScopeOption {
+	return func(s *Scope) {
+		if s.frozen {
+			return
+		}
+		s.strictNilCheck = true
 	}
 }

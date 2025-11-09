@@ -2,7 +2,7 @@
 
 一个高性能、类型安全、支持复杂结构转换的 Go 泛型类型转换库。
 
-> 目前版本为 v0.1.2，处于开发阶段，存在潜在 bug，不建议用于生产环境。欢迎通过 Issues 反馈问题，
+> 目前版本为 v0.1.3，处于开发阶段，存在潜在 bug，不建议用于生产环境。欢迎通过 Issues 反馈问题，
 > 稳定版（v1.0.0）将在充分验证后发布。
 
 ## 简介
@@ -83,66 +83,75 @@ import (
 	"testing"
 )
 
-type S1 struct {
-	V1 int
-	V2 []string
+type FromStruct struct {
+	V1 float64
+	V2 []complex128
+	V3 map[int]int
 }
 
-type S2 struct {
+type ToStruct struct {
 	V1 *string
-	V2 []float64
+	V2 []*string
+	V3 map[string]*string
 }
 
-func ManualCast(s1 *S1) (*S2, error) {
-	v1 := strconv.Itoa(s1.V1)
-	v2 := make([]float64, 0, len(s1.V2))
-	for _, v := range s1.V2 {
-		newV, err := strconv.ParseFloat(v, 64)
-		if err != nil {
-			return nil, err
-		}
-		v2 = append(v2, newV)
+func ManualCast(from *FromStruct) (*ToStruct, error) {
+	v1 := strconv.FormatFloat(from.V1, 'f', -1, 64)
+	v2 := make([]*string, len(from.V2))
+	for i, v := range from.V2 {
+		newV := strconv.FormatComplex(v, 'f', -1, 128)
+		v2[i] = &newV
 	}
-	return &S2{
+	v3 := map[string]*string{}
+	for k, v := range from.V3 {
+		newK := strconv.Itoa(k)
+		newV := strconv.Itoa(v)
+		v3[newK] = &newV
+	}
+	return &ToStruct{
 		V1: &v1,
 		V2: v2,
+		V3: v3,
 	}, nil
 }
 
 func BenchmarkStructCast(b *testing.B) {
-	s1 := &S1{
+	from := &FromStruct{
 		V1: 1,
-		V2: []string{"1", "2"},
+		V2: []complex128{2 + 3i, 4 + 5i, 6 + 7i, 8 + 9i},
+		V3: map[int]int{10: 11, 12: 13, 14: 15, 16: 17, 18: 19},
 	}
 	b.Run("ManualCast", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			_, _ = ManualCast(s1)
+			_, _ = ManualCast(from)
 		}
 	})
 	b.Run("GetCaster", func(b *testing.B) {
-		caster := cast.GetCaster[*S1, *S2]()
+		caster := cast.GetCaster[*FromStruct, *ToStruct]()
 		for i := 0; i < b.N; i++ {
-			_, _ = caster(s1)
+			_, _ = caster(from)
 		}
 	})
 	b.Run("Cast", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			_, _ = cast.Cast[*S1, *S2](s1)
+			_, _ = cast.Cast[*FromStruct, *ToStruct](from)
 		}
 	})
 }
 ```
 
-**测试结果（Apple M3 Pro, Go 1.23）**：
+**测试结果（Apple M3 Pro, Go 1.21）**：
 
 ```text
-BenchmarkStructCast/ManualCast-12         	18646762	        63.37 ns/op
-BenchmarkStructCast/GetCaster-12          	15932622	        74.69 ns/op
-BenchmarkStructCast/Cast-12               	13585936	        87.43 ns/op
+BenchmarkStructCast/ManualCast-12         	 1393200	       850.0 ns/op
+BenchmarkStructCast/GetCaster-12          	 1208700	       983.4 ns/op
+BenchmarkStructCast/Cast-12               	 1000000	       1009 ns/op
 ```
 
-* `GetCaster` 的性能约为手写转换的 1.2 倍，`Cast` 约为 1.4 倍。
-* `GetCaster` 的性能损耗主要是因为闭包无法内联，`Cast` 还有查询缓存的开销，因此整体会逊色于手写转换与代码生成。
+在上面点例子里：
+
+* `GetCaster` 的性能约为手写转换的 1.15 倍，`Cast` 约为 1.18 倍。
+* `GetCaster` 的性能损耗主要是因为闭包无法内联、一些堆内存分配与读取，`Cast` 还有查询缓存的开销，因此整体会逊色于手写转换与代码生成。
 * 在大多数场景下，性能损耗完全可以接受，且换来的是极高的开发效率与类型安全性。
 
 ## 高级用法-作用域
@@ -247,6 +256,14 @@ func GetDeepCopier[T any]() func (T) (T, error)
 scope := cast.NewScope(cast.WithUnexportedFields())
 ```
 
+### 5. 严格 nil 检查
+
+当源值为 nil 时（指无类型或指针类型的 nil），无论目标类型是什么，本库默认会将其转为目标类型对应的零值，支持开启严格 nil 检查，仅允许 nil 转为可以为 nil 的类型，示例如下：
+
+```go
+scope := cast.NewScope(cast.WithStrictNilCheck())
+```
+
 ## 转换规则详解
 
 转换规则可递归应用于复合类型（如 struct、slice、map 等）。以下规则按优先级和逻辑组织：
@@ -292,36 +309,32 @@ scope := cast.NewScope(cast.WithUnexportedFields())
 * 若 `F` 和 `T` 可互转，其各自的多重指针之间也可以互转（如 `*int` 和 `**string` 可互转）
 * `pointer` 与非 `interface` 互转时，尝试用 `pointer` 指向的对象去互转
 
-### 6. Map 转换
+### 6. Map 与 Struct 转换
 
 * `map[K1]V1` → `map[K2]V2`：要求 `K1`→`K2` 与 `V1`→`V2` 均可转换
-* `map` → `struct`：
-    * 优先使用字段的 `json` tag 作为键名
-    * 若未匹配，则回退至字段名
-    * 成功匹配的字段值将按规则转换，若匹配成功但转换失败则会导致整体转换失败
 * `struct` → `map`：
     * 键名优先使用 `json` tag，其次使用字段名
     * 字段值按转换规则映射为 map 的值，若存在无法转换的字段，则不允许整体的转换
+* `map` → `struct`：
+    * 键名优先使用 `json` tag，其次使用字段名
+    * 成功匹配的字段值将按规则转换，若匹配成功但转换失败则会导致整体转换失败
+* `struct` → `struct`：
+    * 字段映射优先依据 `json` tag 匹配，其次使用字段名
+    * 成功匹配的字段值将按规则转换，若匹配成功但转换失败则会导致整体转换失败
 
-### 7. Struct 互转
-
-* 字段映射优先依据 `json` tag 匹配
-* 未通过 tag 匹配的字段，尝试使用字段名匹配
-* 成功匹配的字段值将按规则转换，若匹配成功但转换失败则会导致整体转换失败
-
-### 8. Interface 转换
+### 7. Interface 转换
 
 * **目标为 interface**：要求源值的动态类型实现该接口
 * **源为 interface**：使用其动态值（即"拆箱"后）进行后续转换
 
-### 9. Func 转换
+### 8. Func 转换
 
 * `func(A1, A2) (R1, R2)` → `func(B1, B2) (S1, S2)`：
     * 参数数量与返回值数量必须一致
     * 每个 `Ai` 可转换为 `Bi`，每个 `Ri` 可转换为 `Si`
     * 转换后的函数在调用时自动完成参数与返回值的类型适配
 
-### 10. 特殊处理
+### 9. 特殊处理
 
 * `string` 转 `time.Time`：调用 `time.Parse`，依次尝试标准库里的所有格式进行转换
 * `string` 转 `time.Duration`：若字符串中含有时间单位，则调用 `time.ParseDuration`，否则视为转为 `int64`

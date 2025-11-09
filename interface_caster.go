@@ -29,12 +29,6 @@ func getFallbackInterfaceCaster(s *Scope, fromType, toType reflect.Type) (castFu
 }
 
 func getInterfaceCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
-	if fromType == nil {
-		return func(fromAddr, toAddr unsafe.Pointer) error {
-			*(*any)(toAddr) = nil
-			return nil
-		}, false
-	}
 	fromKind := fromType.Kind()
 	if toType.NumMethod() == 0 {
 		switch fromKind {

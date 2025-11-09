@@ -7,6 +7,7 @@ package cast
 
 import (
 	"reflect"
+	"sync"
 	"unsafe"
 )
 
@@ -189,7 +190,16 @@ func isPtrType(typ reflect.Type) bool {
 	}
 	switch typ.Kind() {
 	// chan、map、func 其实就是一个指针
-	case reflect.Chan, reflect.Map, reflect.Func, reflect.Pointer, reflect.UnsafePointer:
+	case reflect.Chan, reflect.Func, reflect.Map, reflect.Pointer, reflect.UnsafePointer:
+		return true
+	default:
+		return false
+	}
+}
+
+func isNilableType(typ reflect.Type) bool {
+	switch typ.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice, reflect.UnsafePointer:
 		return true
 	default:
 		return false
@@ -287,9 +297,35 @@ func isSpecialHash(typ reflect.Type) bool {
 	}
 }
 
-func getDiffJsonTag(f *reflect.StructField) (string, bool) {
-	if jsonTag, ok := f.Tag.Lookup("json"); ok && jsonTag != f.Name {
-		return jsonTag, true
+func getFinalElem(typ reflect.Type) (int, reflect.Type) {
+	var depth int
+	for typ.Kind() == reflect.Pointer {
+		depth++
+		typ = typ.Elem()
 	}
-	return "", false
+	return depth, typ
+}
+
+var zeroMu sync.RWMutex
+var zeroMap = make(map[unsafe.Pointer]unsafe.Pointer)
+
+func getZeroPtr(typ reflect.Type) unsafe.Pointer {
+	typPtr := typePtr(typ)
+	zeroMu.RLock()
+	if ptr, ok := zeroMap[typPtr]; ok {
+		zeroMu.RUnlock()
+		return ptr
+	}
+	zeroMu.RUnlock()
+
+	zeroMu.Lock()
+	defer zeroMu.Unlock()
+	var zeroPtr unsafe.Pointer
+	if ptr, ok := zeroMap[typPtr]; ok {
+		zeroPtr = ptr
+	} else {
+		zeroPtr = newObject(typ)
+		zeroMap[typPtr] = zeroPtr
+	}
+	return zeroPtr
 }

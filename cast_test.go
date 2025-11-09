@@ -262,51 +262,58 @@ func TestCast(t *testing.T) {
 	}
 }
 
-type S1 struct {
-	V1 int
-	V2 []string
+type FromStruct struct {
+	V1 float64
+	V2 []complex128
+	V3 map[int]int
 }
 
-type S2 struct {
+type ToStruct struct {
 	V1 *string
-	V2 []float64
+	V2 []*string
+	V3 map[string]*string
 }
 
-func ManualCast(s1 *S1) (*S2, error) {
-	v1 := strconv.Itoa(s1.V1)
-	v2 := make([]float64, 0, len(s1.V2))
-	for _, v := range s1.V2 {
-		newV, err := strconv.ParseFloat(v, 64)
-		if err != nil {
-			return nil, err
-		}
-		v2 = append(v2, newV)
+func ManualCast(from *FromStruct) (*ToStruct, error) {
+	v1 := strconv.FormatFloat(from.V1, 'f', -1, 64)
+	v2 := make([]*string, len(from.V2))
+	for i, v := range from.V2 {
+		newV := strconv.FormatComplex(v, 'f', -1, 128)
+		v2[i] = &newV
 	}
-	return &S2{
+	v3 := map[string]*string{}
+	for k, v := range from.V3 {
+		newK := strconv.Itoa(k)
+		newV := strconv.Itoa(v)
+		v3[newK] = &newV
+	}
+	return &ToStruct{
 		V1: &v1,
 		V2: v2,
+		V3: v3,
 	}, nil
 }
 
 func BenchmarkStructCast(b *testing.B) {
-	s1 := &S1{
+	from := &FromStruct{
 		V1: 1,
-		V2: []string{"1", "2"},
+		V2: []complex128{2 + 3i, 4 + 5i, 6 + 7i, 8 + 9i},
+		V3: map[int]int{10: 11, 12: 13, 14: 15, 16: 17, 18: 19},
 	}
 	b.Run("ManualCast", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			_, _ = ManualCast(s1)
+			_, _ = ManualCast(from)
 		}
 	})
 	b.Run("GetCaster", func(b *testing.B) {
-		caster := GetCaster[*S1, *S2]()
+		caster := GetCaster[*FromStruct, *ToStruct]()
 		for i := 0; i < b.N; i++ {
-			_, _ = caster(s1)
+			_, _ = caster(from)
 		}
 	})
 	b.Run("Cast", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			_, _ = Cast[*S1, *S2](s1)
+			_, _ = Cast[*FromStruct, *ToStruct](from)
 		}
 	})
 }

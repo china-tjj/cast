@@ -50,7 +50,7 @@ func TestDeepCopy2(t *testing.T) {
 
 func TestDeepCopy3(t *testing.T) {
 	_, err := DeepCopy[chan int](nil)
-	if err == nil || err.Error() != "invalid deep copy: can't deep copy type 「chan int」" {
+	if err == nil || err.Error() != "invalid deep copy: can't deep copy type <chan int>" {
 		t.Fatal(err)
 	}
 }

@@ -10,45 +10,25 @@ import (
 	"unsafe"
 )
 
-func getFinalElem(typ reflect.Type) (int, reflect.Type) {
-	var depth int
-	for typ.Kind() == reflect.Pointer {
-		depth++
-		typ = typ.Elem()
-	}
-	return depth, typ
-}
-
 func getPointerCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
-	if fromType == nil {
-		return func(fromAddr, toAddr unsafe.Pointer) error {
-			*(*unsafe.Pointer)(toAddr) = nil
-			return nil
-		}, false
-	}
 	switch fromType.Kind() {
-	case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
-		reflect.Float32, reflect.Float64, reflect.Map, reflect.String, reflect.Struct:
-		return getNormalPtrCaster(s, fromType, toType.Elem())
-	case reflect.Array:
-		if isRefAble(s, fromType.Elem(), toType.Elem()) {
-			return arrayToElemPtrCaster, true
-		} else {
-			return getNormalPtrCaster(s, fromType, toType.Elem())
-		}
 	case reflect.Interface:
 		return getUnpackInterfaceCaster(s, fromType, toType)
-	case reflect.Pointer:
-		fromDepth, fromElemType := getFinalElem(fromType)
-		toDepth, toElemType := getFinalElem(toType)
+	case reflect.UnsafePointer:
+		return func(fromAddr, toAddr unsafe.Pointer) error {
+			*(*unsafe.Pointer)(toAddr) = *(*unsafe.Pointer)(fromAddr)
+			return nil
+		}, false
+	default:
+		fromDepth, fromElemType := getFinalElem(fromType) // fromDepth >= 0
+		toDepth, toElemType := getFinalElem(toType)       // toDepth >= 1
 		if isRefAble(s, fromElemType, toElemType) {
 			if fromDepth < toDepth {
 				return func(fromAddr, toAddr unsafe.Pointer) error {
 					for d := toDepth - 1; d > fromDepth; d-- {
-						toPtr := (*unsafe.Pointer)(toAddr)
-						*toPtr = unsafe.Pointer(new(unsafe.Pointer))
-						toAddr = *toPtr
+						ptr := unsafe.Pointer(new(unsafe.Pointer))
+						*(*unsafe.Pointer)(toAddr) = ptr
+						toAddr = ptr
 					}
 					*(*unsafe.Pointer)(toAddr) = fromAddr
 					return nil
@@ -59,6 +39,7 @@ func getPointerCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) 
 					for d := fromDepth; d > toDepth-1; d-- {
 						fromAddr = *(*unsafe.Pointer)(fromAddr)
 						if fromAddr == nil {
+							*(*unsafe.Pointer)(toAddr) = nil
 							return nil
 						}
 					}
@@ -68,24 +49,30 @@ func getPointerCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) 
 			}
 		}
 		var caster castFunc
-		switch fromElemType.Kind() {
-		case reflect.Slice:
-			if toElemType.Kind() == reflect.Array && isRefAble(s, fromElemType.Elem(), toElemType.Elem()) {
-				toDepth--
-				caster, _ = getSliceToArrayPtrCaster(toElemType)
-			} else if isRefAble(s, fromElemType.Elem(), toElemType) {
-				toDepth--
-				caster = sliceToElemPtrCaster
-			} else {
-				caster, _ = getCaster(s, fromElemType, toElemType)
-			}
-		case reflect.Array:
-			if isRefAble(s, fromElemType.Elem(), toElemType) {
-				toDepth--
-				caster = arrayToElemPtrCaster
-			}
-		default:
-			caster, _ = getCaster(s, fromElemType, toElemType)
+		var hasRef bool
+		fromElemKind := fromElemType.Kind()
+		if fromElemKind == reflect.Array && isRefAble(s, fromElemType.Elem(), toElemType) {
+			// [N]T -> *T
+			toDepth--
+			caster, hasRef = arrayToElemPtrCaster, true
+		} else if fromElemKind == reflect.Slice && isRefAble(s, fromElemType.Elem(), toElemType) {
+			// []T -> *T
+			toDepth--
+			caster, hasRef = sliceToElemPtrCaster, false
+		} else if fromElemKind == reflect.Slice && toElemType.Kind() == reflect.Array && isRefAble(s, fromElemType.Elem(), toElemType.Elem()) {
+			// []T -> *[N]T
+			toDepth--
+			caster, hasRef = getSliceToArrayPtrCaster(toElemType), false
+		} else if fromElemKind == reflect.String && isRefAble(s, byteType, toElemType) {
+			// string -> *byte
+			toDepth--
+			caster, hasRef = strToBytePtrCaster, false
+		} else if fromElemKind == reflect.String && toElemType.Kind() == reflect.Array && isRefAble(s, byteType, toElemType.Elem()) {
+			// string -> *[N]byte
+			toDepth--
+			caster, hasRef = getStrToArrayPtrCaster(toElemType), false
+		} else {
+			caster, hasRef = getCaster(s, fromElemType, toElemType)
 		}
 		if caster == nil {
 			return nil, false
@@ -95,67 +82,53 @@ func getPointerCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) 
 			for d := fromDepth; d > toDepth; d-- {
 				fromAddr = *(*unsafe.Pointer)(fromAddr)
 				if fromAddr == nil {
+					*(*unsafe.Pointer)(toAddr) = nil
 					return nil
 				}
 			}
 			for d := toDepth; d > fromDepth; d-- {
-				toPtr := (*unsafe.Pointer)(toAddr)
-				*toPtr = unsafe.Pointer(new(unsafe.Pointer))
-				toAddr = *toPtr
+				if d > 1 {
+					ptr := unsafe.Pointer(new(unsafe.Pointer))
+					*(*unsafe.Pointer)(toAddr) = ptr
+					toAddr = ptr
+				} else {
+					ptr := newObject(toElemType)
+					*(*unsafe.Pointer)(toAddr) = ptr
+					toAddr = ptr
+				}
 			}
 			for d := depth; d > 0; d-- {
 				fromAddr = *(*unsafe.Pointer)(fromAddr)
 				if fromAddr == nil {
+					*(*unsafe.Pointer)(toAddr) = nil
 					return nil
 				}
-				toPtr := (*unsafe.Pointer)(toAddr)
 				if d > 1 {
-					*toPtr = unsafe.Pointer(new(unsafe.Pointer))
+					ptr := unsafe.Pointer(new(unsafe.Pointer))
+					*(*unsafe.Pointer)(toAddr) = ptr
+					toAddr = ptr
 				} else {
-					*toPtr = newObject(toElemType)
+					ptr := newObject(toElemType)
+					*(*unsafe.Pointer)(toAddr) = ptr
+					toAddr = ptr
 				}
-				toAddr = *toPtr
 			}
 			return caster(fromAddr, toAddr)
-		}, false
-	case reflect.Slice:
-		toElemType := toType.Elem()
-		if toElemType.Kind() == reflect.Array && isRefAble(s, fromType.Elem(), toElemType.Elem()) {
-			return getSliceToArrayPtrCaster(toElemType)
-		} else if isRefAble(s, fromType.Elem(), toElemType) {
-			return sliceToElemPtrCaster, false
-		} else {
-			return getNormalPtrCaster(s, fromType, toElemType)
-		}
-	case reflect.UnsafePointer:
-		return func(fromAddr, toAddr unsafe.Pointer) error {
-			*(*unsafe.Pointer)(toAddr) = *(*unsafe.Pointer)(fromAddr)
-			return nil
-		}, false
-	default:
-		return nil, false
+		}, hasRef && fromDepth <= toDepth && depth == 0
 	}
 }
 
-func getNormalPtrCaster(s *Scope, fromType, toElemType reflect.Type) (castFunc, bool) {
-	if isRefAble(s, fromType, toElemType) {
-		return func(fromAddr, toAddr unsafe.Pointer) error {
-			*(*unsafe.Pointer)(toAddr) = fromAddr
-			return nil
-		}, true
-	}
-	caster, hasRef := getCaster(s, fromType, toElemType)
-	if caster == nil {
-		return nil, false
-	}
-	return func(fromAddr, toAddr unsafe.Pointer) error {
-		toPtr := (*unsafe.Pointer)(toAddr)
-		*toPtr = newObject(toElemType)
-		return caster(fromAddr, *toPtr)
-	}, hasRef
+func sliceToElemPtrCaster(fromAddr, toAddr unsafe.Pointer) error {
+	*(*unsafe.Pointer)(toAddr) = (*slice)(fromAddr).data
+	return nil
 }
 
-func getSliceToArrayPtrCaster(arrayType reflect.Type) (castFunc, bool) {
+func arrayToElemPtrCaster(fromAddr, toAddr unsafe.Pointer) error {
+	*(*unsafe.Pointer)(toAddr) = fromAddr
+	return nil
+}
+
+func getSliceToArrayPtrCaster(arrayType reflect.Type) castFunc {
 	length := arrayType.Len()
 	elemTypePtr := typePtr(arrayType.Elem())
 	return func(fromAddr, toAddr unsafe.Pointer) error {
@@ -169,15 +142,28 @@ func getSliceToArrayPtrCaster(arrayType reflect.Type) (castFunc, bool) {
 			typedslicecopy(elemTypePtr, to, length, from.data, from.len)
 		}
 		return nil
-	}, false
+	}
 }
 
-func sliceToElemPtrCaster(fromAddr, toAddr unsafe.Pointer) error {
-	*(*unsafe.Pointer)(toAddr) = (*slice)(fromAddr).data
+func strToBytePtrCaster(fromAddr, toAddr unsafe.Pointer) error {
+	from := (*str)(fromAddr)
+	*(*unsafe.Pointer)(toAddr) = from.data
 	return nil
 }
 
-func arrayToElemPtrCaster(fromAddr, toAddr unsafe.Pointer) error {
-	*(*unsafe.Pointer)(toAddr) = fromAddr
-	return nil
+func getStrToArrayPtrCaster(arrayType reflect.Type) castFunc {
+	length := arrayType.Len()
+	elemTypePtr := typePtr(arrayType.Elem())
+	return func(fromAddr, toAddr unsafe.Pointer) error {
+		from := *(*str)(fromAddr)
+		toPtr := (*unsafe.Pointer)(toAddr)
+		if from.len >= length {
+			*toPtr = from.data
+		} else {
+			to := newObject(arrayType)
+			*toPtr = to
+			typedslicecopy(elemTypePtr, to, length, from.data, from.len)
+		}
+		return nil
+	}
 }

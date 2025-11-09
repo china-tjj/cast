@@ -2,7 +2,7 @@
 
 一个高性能、类型安全、支持复杂结构转换的 Go 泛型类型转换库。
 
-> 目前版本为 v0.1.3，处于开发阶段，存在潜在 bug，不建议用于生产环境。欢迎通过 Issues 反馈问题，
+> 目前版本为 v0.1.4，处于开发阶段，存在潜在 bug，不建议用于生产环境。欢迎通过 Issues 反馈问题，
 > 稳定版（v1.0.0）将在充分验证后发布。
 
 ## 简介
@@ -22,10 +22,13 @@
 func Cast[F any, T any](from F) (to T, err error)
 
 func GetCaster[F any, T any]() func (from F) (to T, err error)
+
+func MustGetCaster[F any, T any]() func(from F) (to T, err error)
 ```
 
 * `Cast[F, T]`：尝试将类型 `F` 的值 `from` 转换为类型 `T`。返回转换结果与错误信息。
 * `GetCaster[F, T]`：返回转换器，避免每次调用时查询缓存，适用于高频转换场景，性能略优于直接调用 `Cast`。
+* `MustGetCaster[F, T]`：类似于 GetCaster，区别为：当这两个类型之间的转换不合法时，GetCaster 会返回一个必定返回 err 的转换器，MustGetCaster 会 panic
 
 ## 适用场景
 
@@ -148,7 +151,7 @@ BenchmarkStructCast/GetCaster-12          	 1208700	       983.4 ns/op
 BenchmarkStructCast/Cast-12               	 1000000	       1009 ns/op
 ```
 
-在上面点例子里：
+在上面的例子里：
 
 * `GetCaster` 的性能约为手写转换的 1.15 倍，`Cast` 约为 1.18 倍。
 * `GetCaster` 的性能损耗主要是因为闭包无法内联、一些堆内存分配与读取，`Cast` 还有查询缓存的开销，因此整体会逊色于手写转换与代码生成。

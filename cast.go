@@ -60,6 +60,11 @@ func GetCaster[F any, T any]() func(from F) (to T, err error) {
 	return GetCasterWithScope[F, T](defaultScope)
 }
 
+// MustGetCaster 获取实例化的转换方法，调用该方法返回的函数，对比直接调用 Cast 少了查缓存的步骤，性能会略微好一点。当不允许这两个类型之间的转换时会 panic
+func MustGetCaster[F any, T any]() func(from F) (to T, err error) {
+	return MustGetCasterWithScope[F, T](defaultScope)
+}
+
 // ReflectCast 以反射的方式，需输入待转换的值与要转换的类型
 func ReflectCast(from reflect.Value, toType reflect.Type) (to reflect.Value, err error) {
 	return ReflectCastWithScope(defaultScope, from, toType)
@@ -87,6 +92,21 @@ func GetCasterWithScope[F any, T any](s *Scope) func(from F) (to T, err error) {
 		return func(from F) (to T, err error) {
 			return to, e
 		}
+	}
+	return func(from F) (to T, err error) {
+		// 当from包含指针时，这部分指针指向的内容会逃逸
+		escape(from)
+		err = caster(noEscape(unsafe.Pointer(&from)), noEscape(unsafe.Pointer(&to)))
+		return to, err
+	}
+}
+
+// MustGetCasterWithScope 获取实例化的转换方法，调用该方法返回的函数，对比直接调用 Cast 少了查缓存的步骤，性能会略微好一点。当不允许这两个类型之间的转换时会 panic
+func MustGetCasterWithScope[F any, T any](s *Scope) func(from F) (to T, err error) {
+	fromType, toType := typeFor[F](), typeFor[T]()
+	caster, _ := getCaster(s, fromType, toType)
+	if caster == nil {
+		panic(invalidCastErr(s, fromType, toType))
 	}
 	return func(from F) (to T, err error) {
 		// 当from包含指针时，这部分指针指向的内容会逃逸

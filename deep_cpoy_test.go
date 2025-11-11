@@ -1,6 +1,7 @@
 package cast
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -52,5 +53,17 @@ func TestDeepCopy3(t *testing.T) {
 	_, err := DeepCopy[chan int](nil)
 	if err == nil || err.Error() != "invalid deep copy: can't deep copy type <chan int>" {
 		t.Fatal(err)
+	}
+}
+
+func TestDeepCopy4(t *testing.T) {
+	// errors.New 的 struct 有未导出字段，无法深拷贝
+	_, err := DeepCopy[error](errors.New("err"))
+	if err == nil || err.Error() != "invalid cast: can't cast type <*errors.errorString> to <error>" {
+		t.Fatal(err)
+	}
+	copied, err := DeepCopy[error](strErr("err"))
+	if err != nil || copied.Error() != "err" {
+		t.Fatal(copied, err)
 	}
 }

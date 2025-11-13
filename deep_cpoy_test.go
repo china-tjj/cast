@@ -58,11 +58,11 @@ func TestDeepCopy3(t *testing.T) {
 
 func TestDeepCopy4(t *testing.T) {
 	// errors.New 的 struct 有未导出字段，无法深拷贝
-	_, err := DeepCopy[error](errors.New("err"))
-	if err == nil || err.Error() != "invalid cast: can't cast type <*errors.errorString> to <error>" {
+	copied, err := DeepCopy[error](errors.New("err"))
+	if err != nil || copied.Error() != "" {
 		t.Fatal(err)
 	}
-	copied, err := DeepCopy[error](strErr("err"))
+	copied, err = DeepCopy[error](strErr("err"))
 	if err != nil || copied.Error() != "err" {
 		t.Fatal(copied, err)
 	}

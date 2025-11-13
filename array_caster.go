@@ -34,9 +34,11 @@ func getArrayCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 		length := min(fromType.Len(), toType.Len())
 		fromElemSize := fromElemType.Size()
 		toElemSize := toElemType.Size()
+		zeroPtr := getZeroPtr(toType)
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			for i := 0; i < length; i++ {
 				if err := elemCaster(offset(fromAddr, i, fromElemSize), offset(toAddr, i, toElemSize)); err != nil {
+					typedmemmove(typePtr(toType), toAddr, zeroPtr)
 					return err
 				}
 			}
@@ -65,11 +67,13 @@ func getArrayCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 		fromElemSize := fromElemType.Size()
 		toElemSize := toElemType.Size()
 		toLen := toElemType.Len()
+		zeroPtr := getZeroPtr(toType)
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			from := *(*slice)(fromAddr)
 			length := min(from.len, toLen)
 			for i := 0; i < length; i++ {
 				if err := elemCaster(offset(from.data, i, fromElemSize), offset(toAddr, i, toElemSize)); err != nil {
+					typedmemmove(typePtr(toType), toAddr, zeroPtr)
 					return err
 				}
 			}

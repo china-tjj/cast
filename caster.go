@@ -20,7 +20,7 @@ type casterKey struct {
 }
 
 // fromAddr, toAddr都不能为 nil（fromType 为 nil 时允许 fromAddr 为 nil）
-// 不要求 toAddr 指向的内存为 0 值
+// 要求 toAddr 指向的内存为 0 值 -> 转换失败时，若有部分写入，写回零值
 type castFunc func(fromAddr, toAddr unsafe.Pointer) error
 
 type casterValue struct {

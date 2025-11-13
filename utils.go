@@ -234,7 +234,7 @@ func newObject(typ reflect.Type) unsafe.Pointer {
 
 func copyObject(typ reflect.Type, ptr unsafe.Pointer) unsafe.Pointer {
 	tp := typePtr(typ)
-	copiedPtr := mallocgc(typ.Size(), tp, false)
+	copiedPtr := mallocgc(typ.Size(), tp, true)
 	typedmemmove(tp, copiedPtr, ptr)
 	return copiedPtr
 }
@@ -308,8 +308,13 @@ func getFinalElem(typ reflect.Type) (int, reflect.Type) {
 
 var zeroMu sync.RWMutex
 var zeroMap = make(map[unsafe.Pointer]unsafe.Pointer)
+var zeros [zerosSize]byte
 
 func getZeroPtr(typ reflect.Type) unsafe.Pointer {
+	if typ.Size() < zerosSize {
+		return unsafe.Pointer(&zeros[0])
+	}
+
 	typPtr := typePtr(typ)
 	zeroMu.RLock()
 	if ptr, ok := zeroMap[typPtr]; ok {

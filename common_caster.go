@@ -86,7 +86,6 @@ type interfaceCastHandler struct {
 	fromTypeNumMethod int
 	toTypePtr         unsafe.Pointer
 	toTypeIsNilable   bool
-	toZeroPtr         unsafe.Pointer
 }
 
 func newInterfaceCastHandler(s *Scope, fromType, toType reflect.Type) *interfaceCastHandler {
@@ -97,7 +96,6 @@ func newInterfaceCastHandler(s *Scope, fromType, toType reflect.Type) *interface
 		fromTypeNumMethod: fromType.NumMethod(),
 		toTypePtr:         typePtr(toType),
 		toTypeIsNilable:   isNilableType(toType),
-		toZeroPtr:         getZeroPtr(toType),
 	}
 }
 
@@ -108,7 +106,6 @@ func (handler *interfaceCastHandler) normalCast(from any, toAddr unsafe.Pointer)
 		if handler.s.strictNilCheck && !handler.toTypeIsNilable {
 			return invalidCastErr(handler.s, fromElemType, handler.toType)
 		}
-		typedmemmove(handler.toTypePtr, toAddr, handler.toZeroPtr)
 		return nil
 	}
 	key := casterKey{fromTypePtr: fromElemTypePtr, toTypePtr: handler.toTypePtr}
@@ -191,7 +188,6 @@ func getAddressingPointerCaster(s *Scope, fromType, toType reflect.Type) (castFu
 	if elemCaster == nil {
 		return nil, false
 	}
-	zeroPtr := getZeroPtr(toType)
 	toTypeIsNilable := isNilableType(toType)
 	return func(fromAddr, toAddr unsafe.Pointer) error {
 		for i := depth; i > 0; i-- {
@@ -200,7 +196,6 @@ func getAddressingPointerCaster(s *Scope, fromType, toType reflect.Type) (castFu
 				if s.strictNilCheck && !toTypeIsNilable {
 					return NilPtrErr
 				}
-				typedmemmove(typePtr(toType), toAddr, zeroPtr)
 				return nil
 			}
 		}

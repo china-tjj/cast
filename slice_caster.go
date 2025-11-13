@@ -36,6 +36,7 @@ func getSliceCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 			*toPtr = makeSlice(toElemType, length, length)
 			for i := 0; i < length; i++ {
 				if err := elemCaster(offset(fromAddr, i, fromElemSize), offset(toPtr.data, i, toElemSize)); err != nil {
+					*toPtr = slice{}
 					return err
 				}
 			}
@@ -59,6 +60,7 @@ func getSliceCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 			*toPtr = makeSlice(toElemType, from.len, from.cap)
 			for i := 0; i < from.len; i++ {
 				if err := elemCaster(offset(from.data, i, fromElemSize), offset(toPtr.data, i, toElemSize)); err != nil {
+					*toPtr = slice{}
 					return err
 				}
 			}

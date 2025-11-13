@@ -33,6 +33,8 @@ func getMapCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 		// 小优化，减少堆内存分配
 		globalKeyBuffer := newObject(toKeyType)
 		globalValueBuffer := newObject(toElemType)
+		keyZeroPtr := getZeroPtr(toKeyType)
+		valueZeroPtr := getZeroPtr(toElemType)
 		var mu atomic.Uint32
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			from := *(*map[any]any)(fromAddr)
@@ -55,10 +57,14 @@ func getMapCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 				toV = newObject(toElemType)
 			}
 			fromMapHelper.Range(from, func(key unsafe.Pointer, value unsafe.Pointer) bool {
+				typedmemmove(typePtr(toKeyType), toK, keyZeroPtr)
 				if err = keyCaster(key, toK); err != nil {
+					*(*map[any]any)(toAddr) = nil
 					return false
 				}
+				typedmemmove(typePtr(toElemType), toV, valueZeroPtr)
 				if err = elemCaster(value, toV); err != nil {
+					*(*map[any]any)(toAddr) = nil
 					return false
 				}
 				toMapHelper.Store(to, toK, toV)
@@ -119,6 +125,7 @@ func getMapCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 		// 小优化，减少堆内存分配
 		globalValueBuffer := newObject(toElemType)
 		var mu atomic.Uint32
+		valueZeroPtr := getZeroPtr(toElemType)
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			to := toMapHelper.Make(toAddr, n)
 			var v unsafe.Pointer
@@ -138,12 +145,15 @@ func getMapCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 				} else if keyIsRefType {
 					k = newObject(toKeyType)
 					if err := keyCaster(unsafe.Pointer(&data[i].strKey), k); err != nil {
+						*(*map[any]any)(toAddr) = nil
 						return err
 					}
 				} else {
 					k = data[i].fieldKey
 				}
+				typedmemmove(typePtr(toElemType), v, valueZeroPtr)
 				if err := data[i].fieldCaster(unsafe.Add(fromAddr, data[i].fieldOffset), v); err != nil {
+					*(*map[any]any)(toAddr) = nil
 					return err
 				}
 				toMapHelper.Store(to, k, v)

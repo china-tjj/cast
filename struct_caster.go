@@ -59,15 +59,18 @@ func getStructCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 			}
 		}
 		fromMapHelper := getMapHelper(fromType)
+		zeroPtr := getZeroPtr(toType)
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			from := *(*map[any]any)(fromAddr)
 			for i := 0; i < n; i++ {
 				if data[i].jsonTagKey != nil {
 					if v, ok := fromMapHelper.Load(from, data[i].jsonTagKey, data[i].fieldHasRef); ok {
 						if data[i].fieldCaster == nil {
+							typedmemmove(typePtr(toType), toAddr, zeroPtr)
 							return invalidCastErr(s, fromElemType, data[i].fieldType)
 						}
 						if err := data[i].fieldCaster(v, unsafe.Add(toAddr, data[i].fieldOffset)); err != nil {
+							typedmemmove(typePtr(toType), toAddr, zeroPtr)
 							return err
 						}
 						continue
@@ -76,9 +79,11 @@ func getStructCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 				if data[i].fieldNameKey != nil {
 					if v, ok := fromMapHelper.Load(from, data[i].fieldNameKey, data[i].fieldHasRef); ok {
 						if data[i].fieldCaster == nil {
+							typedmemmove(typePtr(toType), toAddr, zeroPtr)
 							return invalidCastErr(s, fromElemType, data[i].fieldType)
 						}
 						if err := data[i].fieldCaster(v, unsafe.Add(toAddr, data[i].fieldOffset)); err != nil {
+							typedmemmove(typePtr(toType), toAddr, zeroPtr)
 							return err
 						}
 						continue
@@ -116,7 +121,6 @@ func getStructCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 			caster     castFunc
 		}
 		data := make([]medaData, nTo)
-		casterCnt := 0
 		getMappedField := func(field *reflect.StructField) *reflect.StructField {
 			if jsonTag, ok := field.Tag.Lookup("json"); ok {
 				if mappedField, ok := fromJsonTagMap[jsonTag]; ok {
@@ -129,6 +133,7 @@ func getStructCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 			return nil
 		}
 		hasRef := false
+		needCast := false
 		for i := 0; i < nTo; i++ {
 			toField := toType.Field(i)
 			if !s.castUnexported && !toField.IsExported() {
@@ -145,18 +150,22 @@ func getStructCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 			if data[i].caster == nil {
 				return nil, false
 			}
-			casterCnt++
+			needCast = true
 			hasRef = hasRef || fHasRef
 		}
-		if casterCnt == 0 && nFrom > 0 {
-			return nil, false
+		if !needCast {
+			return func(fromAddr, toAddr unsafe.Pointer) error {
+				return nil
+			}, false
 		}
+		zeroPtr := getZeroPtr(toType)
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			for i := 0; i < nTo; i++ {
 				if data[i].caster == nil {
 					continue
 				}
 				if err := data[i].caster(unsafe.Add(fromAddr, data[i].fromOffset), unsafe.Add(toAddr, data[i].toOffset)); err != nil {
+					typedmemmove(typePtr(toType), toAddr, zeroPtr)
 					return err
 				}
 			}

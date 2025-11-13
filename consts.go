@@ -42,3 +42,5 @@ var (
 	stringerType = typeFor[fmt.Stringer]()
 	byteType     = typeFor[byte]()
 )
+
+const zerosSize = 1024

@@ -16,7 +16,7 @@ func main() {
 		"port": 8080,
 	}
 
-	cfg, err := cast.Cast[any, Config](input)
+	cfg, err := cast.To[Config](input)
 	if err != nil {
 		panic(err)
 	}

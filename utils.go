@@ -334,3 +334,124 @@ func getZeroPtr(typ reflect.Type) unsafe.Pointer {
 	}
 	return zeroPtr
 }
+
+type structField struct {
+	name              string
+	jsonTag           string
+	offset            uintptr
+	typ               reflect.Type
+	isAnonymousStruct bool
+	// 嵌套结构体指针相关字段
+	parent        *structField
+	parentElemTyp reflect.Type
+}
+
+// addr 为根结构体的地址，要求不为 nil。递归放到 getAddrSlow，使得该函数可以内联
+func (f *structField) getAddr(addr unsafe.Pointer, newIfNil bool) unsafe.Pointer {
+	if f.parent != nil {
+		return f.getAddrSlow(addr, newIfNil)
+	}
+	return unsafe.Add(addr, f.offset)
+}
+
+func (f *structField) getAddrSlow(addr unsafe.Pointer, newIfNil bool) unsafe.Pointer {
+	if f.parent != nil {
+		parentAddr := f.parent.getAddrSlow(addr, newIfNil)
+		addr = *(*unsafe.Pointer)(parentAddr)
+		if addr == nil {
+			if !newIfNil {
+				return nil
+			}
+			addr = newObject(f.parentElemTyp)
+			*(*unsafe.Pointer)(parentAddr) = addr
+		}
+	}
+	return unsafe.Add(addr, f.offset)
+}
+
+func getAllFields(s *Scope, typ reflect.Type) ([]*structField, map[string]*structField, map[string]*structField) {
+	return getAllFieldsInner(s, typ, 0, nil)
+}
+
+func getAllFieldsInner(s *Scope, typ reflect.Type, offset uintptr, parent *structField) ([]*structField, map[string]*structField, map[string]*structField) {
+	n := typ.NumField()
+	fields := make([]*structField, 0, n)
+	var anonymousFields []*structField
+	nameMap := make(map[string]*structField, n)
+	jsonTagMap := make(map[string]*structField, n)
+	anonymousNameMap := make(map[string][]*structField)
+	anonymousJsonTagMap := make(map[string][]*structField)
+	for i := 0; i < n; i++ {
+		reflectField := typ.Field(i)
+		if !s.castUnexported && !reflectField.IsExported() {
+			continue
+		}
+		field := &structField{
+			offset: offset + reflectField.Offset,
+			name:   reflectField.Name,
+			typ:    reflectField.Type,
+		}
+		if parent != nil {
+			field.parent = parent
+			field.parentElemTyp = parent.typ.Elem()
+		}
+		fields = append(fields, field)
+		nameMap[field.name] = field
+		if jsonTag, ok := typ.Field(i).Tag.Lookup("json"); ok {
+			field.jsonTag = jsonTag
+			jsonTagMap[field.jsonTag] = field
+		}
+		if !reflectField.Anonymous {
+			continue
+		}
+		if field.typ.Kind() == reflect.Struct {
+			field.isAnonymousStruct = true
+			anonymousFieldList, _, _ := getAllFieldsInner(s, field.typ, field.offset, nil)
+			for _, anonymousField := range anonymousFieldList {
+				anonymousFields = append(anonymousFields, anonymousField)
+				name, jsonTag := anonymousField.name, anonymousField.jsonTag
+				anonymousNameMap[name] = append(anonymousNameMap[name], anonymousField)
+				if anonymousField.jsonTag == "" {
+					continue
+				}
+				anonymousJsonTagMap[jsonTag] = append(anonymousJsonTagMap[jsonTag], anonymousField)
+			}
+		} else if field.typ.Kind() == reflect.Ptr && field.typ.Elem().Kind() == reflect.Struct {
+			field.isAnonymousStruct = true
+			anonymousFieldList, _, _ := getAllFieldsInner(s, field.typ.Elem(), 0, field)
+			for _, anonymousField := range anonymousFieldList {
+				anonymousFields = append(anonymousFields, anonymousField)
+				name, jsonTag := anonymousField.name, anonymousField.jsonTag
+				anonymousNameMap[name] = append(anonymousNameMap[name], anonymousField)
+				if anonymousField.jsonTag == "" {
+					continue
+				}
+				anonymousJsonTagMap[jsonTag] = append(anonymousJsonTagMap[jsonTag], anonymousField)
+			}
+		}
+	}
+	for _, anonymousField := range anonymousFields {
+		name, jsonTag := anonymousField.name, anonymousField.jsonTag
+		nameOk, jsonTagOk := false, false
+		if _, ok := nameMap[name]; !ok && len(anonymousNameMap[name]) == 1 {
+			nameMap[name] = anonymousField
+			nameOk = true
+		}
+		if jsonTag != "" {
+			if _, ok := jsonTagMap[jsonTag]; !ok && len(anonymousJsonTagMap[jsonTag]) == 1 {
+				jsonTagMap[jsonTag] = anonymousField
+				jsonTagOk = true
+			}
+		}
+		if nameOk && jsonTagOk {
+			fields = append(fields, anonymousField)
+		} else if nameOk { // && !jsonTagOk
+			anonymousField.jsonTag = ""
+			fields = append(fields, anonymousField)
+		} else if jsonTagOk { // && !nameOk
+			anonymousField.name = ""
+			fields = append(fields, anonymousField)
+		}
+	}
+	return fields, nameMap, jsonTagMap
+}

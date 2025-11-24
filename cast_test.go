@@ -164,6 +164,21 @@ func TestNilAnyCast(t *testing.T) {
 }
 
 func TestCast(t *testing.T) {
+	type S1 struct {
+		A int
+	}
+	type S2 struct {
+		S1
+		B int
+	}
+	type S3 struct {
+		*S1
+		B int
+	}
+	type S4 struct {
+		A int
+		B int
+	}
 	equalGroups := [][]any{
 		{
 			int(123), int8(123), int16(123), int32(123), int64(123),
@@ -232,6 +247,15 @@ func TestCast(t *testing.T) {
 		{
 			ptr(any(errors.New("123"))),
 			ptr(errors.New("123")),
+		},
+		{
+			S2{S1{1}, 2},
+			S3{&S1{1}, 2},
+			S4{1, 2},
+			map[string]any{
+				"A": 1,
+				"B": 2,
+			},
 		},
 	}
 	for _, group := range equalGroups {
@@ -314,6 +338,11 @@ func BenchmarkStructCast(b *testing.B) {
 	b.Run("Cast", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			_, _ = Cast[*FromStruct, *ToStruct](from)
+		}
+	})
+	b.Run("To", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_, _ = To[*ToStruct](from)
 		}
 	})
 }

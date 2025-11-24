@@ -81,37 +81,42 @@ func getMapCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 			return nil, false
 		}
 		toElemType := toType.Elem()
-		n := fromType.NumField()
+		allFields, _, _ := getAllFields(s, fromType)
+		var fields []*structField
+		for _, field := range allFields {
+			if field.isAnonymousStruct {
+				continue
+			}
+			fields = append(fields, field)
+		}
 		toMapHelper := getMapHelper(toType)
-		if n == 0 {
+		if len(fields) == 0 {
 			return func(fromAddr, toAddr unsafe.Pointer) error {
 				toMapHelper.Make(toAddr, 0)
 				return nil
 			}, false
 		}
 		type medaData struct {
+			field       *structField
 			strKey      string
 			fieldKey    unsafe.Pointer
 			fieldCaster castFunc
-			fieldOffset uintptr
+			isNilable   bool
 		}
-		data := make([]medaData, n)
+		data := make([]medaData, len(fields))
 		hasRef := false
 		keyIsStr := toKeyType.Kind() == reflect.String
 		keyIsRefType := isRefType(toKeyType)
-		for i := 0; i < n; i++ {
-			field := fromType.Field(i)
-			if !s.castUnexported && !field.IsExported() {
-				continue
-			}
+		for i, field := range fields {
+			data[i].field = field
 			var fHasRef bool
-			data[i].fieldCaster, fHasRef = getCaster(s, field.Type, toElemType)
+			data[i].fieldCaster, fHasRef = getCaster(s, field.typ, toElemType)
 			if data[i].fieldCaster == nil {
 				return nil, false
 			}
-			data[i].strKey = field.Name
-			if jsonTag, ok := field.Tag.Lookup("json"); ok {
-				data[i].strKey = jsonTag
+			data[i].strKey = field.name
+			if field.jsonTag != "" {
+				data[i].strKey = field.jsonTag
 			}
 			if !keyIsStr && !keyIsRefType {
 				data[i].fieldKey = newObject(toKeyType)
@@ -119,7 +124,7 @@ func getMapCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 					return nil, false
 				}
 			}
-			data[i].fieldOffset = field.Offset
+			data[i].isNilable = isNilableType(field.typ)
 			hasRef = hasRef || fHasRef
 		}
 		// 小优化，减少堆内存分配
@@ -127,7 +132,7 @@ func getMapCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 		var mu atomic.Uint32
 		valueZeroPtr := getZeroPtr(toElemType)
 		return func(fromAddr, toAddr unsafe.Pointer) error {
-			to := toMapHelper.Make(toAddr, n)
+			to := toMapHelper.Make(toAddr, len(data))
 			var v unsafe.Pointer
 			if mu.CompareAndSwap(0, 1) {
 				defer mu.Store(0)
@@ -135,10 +140,7 @@ func getMapCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 			} else {
 				v = newObject(toElemType)
 			}
-			for i := 0; i < n; i++ {
-				if data[i].fieldCaster == nil {
-					continue
-				}
+			for i := range data {
 				var k unsafe.Pointer
 				if keyIsStr {
 					k = unsafe.Pointer(&data[i].strKey)
@@ -151,8 +153,16 @@ func getMapCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 				} else {
 					k = data[i].fieldKey
 				}
+				fromFieldAddr := data[i].field.getAddr(fromAddr, false)
+				if fromFieldAddr == nil {
+					if s.strictNilCheck && !data[i].isNilable {
+						*(*map[any]any)(toAddr) = nil
+						return NilPtrErr
+					}
+					continue
+				}
 				typedmemmove(typePtr(toElemType), v, valueZeroPtr)
-				if err := data[i].fieldCaster(unsafe.Add(fromAddr, data[i].fieldOffset), v); err != nil {
+				if err := data[i].fieldCaster(fromFieldAddr, v); err != nil {
 					*(*map[any]any)(toAddr) = nil
 					return err
 				}

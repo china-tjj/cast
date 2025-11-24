@@ -2,7 +2,7 @@
 
 一个高性能、类型安全、支持复杂结构转换的 Go 泛型类型转换库。
 
-> 目前版本为 v0.1.6，处于开发阶段，存在潜在 bug，不建议用于生产环境。欢迎通过 Issues 反馈问题，
+> 目前版本为 v0.1.7，处于开发阶段，存在潜在 bug，不建议用于生产环境。欢迎通过 Issues 反馈问题，
 > 稳定版（v1.0.0）将在充分验证后发布。
 
 ## 简介
@@ -19,16 +19,21 @@
 ## 核心函数
 
 ```go
+// To 将任意类型转为T, 相当于 Cast[any, T]
+func To[T any](from any) (T, error)
+
+// Cast 将类型F转为T
 func Cast[F any, T any](from F) (to T, err error)
 
+// GetCaster 获取实例化的转换方法, 对比直接调用 Cast 少了查缓存的步骤, 性能会略微好一点
 func GetCaster[F any, T any]() func (from F) (to T, err error)
 
-func MustGetCaster[F any, T any]() func(from F) (to T, err error)
-```
+// MustGetCaster 类似于 GetCaster, 区别为: 当这两个类型之间的转换不合法时, GetCaster 会返回一个必定返回 err 的转换器, MustGetCaster 会 panic
+func MustGetCaster[F any, T any]() func (from F) (to T, err error)
 
-* `Cast[F, T]`：尝试将类型 `F` 的值 `from` 转换为类型 `T`。返回转换结果与错误信息。
-* `GetCaster[F, T]`：返回转换器，避免每次调用时查询缓存，适用于高频转换场景，性能略优于直接调用 `Cast`。
-* `MustGetCaster[F, T]`：类似于 GetCaster，区别为：当这两个类型之间的转换不合法时，GetCaster 会返回一个必定返回 err 的转换器，MustGetCaster 会 panic
+// ReflectCast 使用反射将 from 反射值转换为 toType 对应的反射值
+func ReflectCast(from reflect.Value, toType reflect.Type) (to reflect.Value, err error) 
+```
 
 ## 适用场景
 
@@ -64,7 +69,7 @@ func main() {
 		"port": 8080,
 	}
 
-	cfg, err := cast.Cast[any, Config](input)
+	cfg, err := cast.To[Config](input)
 	if err != nil {
 		panic(err)
 	}
@@ -140,22 +145,29 @@ func BenchmarkStructCast(b *testing.B) {
 			_, _ = cast.Cast[*FromStruct, *ToStruct](from)
 		}
 	})
+	b.Run("To", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_, _ = cast.To[*ToStruct](from)
+		}
+	})
 }
 ```
 
 **测试结果（Apple M3 Pro, Go 1.21）**：
 
 ```text
-BenchmarkStructCast/ManualCast-12         	 1393200	       850.0 ns/op
-BenchmarkStructCast/GetCaster-12          	 1208700	       983.4 ns/op
-BenchmarkStructCast/Cast-12               	 1000000	       1009 ns/op
+BenchmarkStructCast/ManualCast-12         	 1321321	       888.2 ns/op
+BenchmarkStructCast/GetCaster-12          	 1000000	       1067 ns/op
+BenchmarkStructCast/Cast-12               	 1000000	       1083 ns/op
+BenchmarkStructCast/To-12                 	 1000000	       1097 ns/op
 ```
 
 在上面的例子里：
 
-* `GetCaster` 的性能约为手写转换的 1.15 倍，`Cast` 约为 1.18 倍。
-* `GetCaster` 的性能损耗主要是因为闭包无法内联、一些堆内存分配与读取，`Cast` 还有查询缓存的开销，因此整体会逊色于手写转换与代码生成。
-* 在大多数场景下，性能损耗完全可以接受，且换来的是极高的开发效率与类型安全性。
+* `GetCaster`、`Cast`、`To` 的性能均约为手写转换的 1.2 倍。
+* `GetCaster` 的性能损耗主要是因为闭包无法内联、一些堆内存分配与读取，`Cast` 还有查询缓存的开销，`To`
+  还有拆箱的开销，因此整体会逊色于手写转换与代码生成。
+* 在大多数场景下，性能损耗完全可以接受。
 
 ## 高级用法-作用域
 
@@ -261,7 +273,8 @@ scope := cast.NewScope(cast.WithUnexportedFields())
 
 ### 5. 严格 nil 检查
 
-当源值为 nil 时（指无类型或指针类型的 nil），无论目标类型是什么，本库默认会将其转为目标类型对应的零值，支持开启严格 nil 检查，仅允许 nil 转为可以为 nil 的类型，示例如下：
+当源值为 nil 时（指无类型或指针类型的 nil），无论目标类型是什么，本库默认会将其转为目标类型对应的零值，支持开启严格 nil
+检查，仅允许 nil 转为可以为 nil 的类型，示例如下：
 
 ```go
 scope := cast.NewScope(cast.WithStrictNilCheck())

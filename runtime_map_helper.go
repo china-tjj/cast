@@ -3,8 +3,6 @@
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file.
 
-//go:build !go1.26
-
 package cast
 
 import (
@@ -37,7 +35,7 @@ func makeMap(t unsafe.Pointer, hint int, h map[any]any) map[any]any
 func mapAccess2(t unsafe.Pointer, h map[any]any, key unsafe.Pointer) (unsafe.Pointer, bool)
 
 //go:linkname mapAccess2FastStr runtime.mapaccess2_faststr
-func mapAccess2FastStr(t unsafe.Pointer, h map[any]any, ky string) (unsafe.Pointer, bool)
+func mapAccess2FastStr(t unsafe.Pointer, h map[any]any, key string) (unsafe.Pointer, bool)
 
 //go:linkname mapAccess2Fast32 runtime.mapaccess2_fast32
 func mapAccess2Fast32(t unsafe.Pointer, h map[any]any, key uint32) (unsafe.Pointer, bool)
@@ -82,8 +80,8 @@ const (
 	keyFlagNormal
 )
 
-func getKeyFlag(keyFlag reflect.Type) int8 {
-	switch keyFlag.Kind() {
+func getKeyFlag(keyType reflect.Type) int8 {
+	switch keyType.Kind() {
 	case reflect.String:
 		return keyFlagFastStr
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
@@ -92,31 +90,38 @@ func getKeyFlag(keyFlag reflect.Type) int8 {
 	case reflect.UnsafePointer, reflect.Ptr:
 		return keyFlagFastPtr
 	case reflect.Array:
-		switch keyFlag.Len() {
+		length := keyType.Len()
+		if uintptr(length)*keyType.Elem().Size() != keyType.Size() {
+			return keyFlagNormal
+		}
+		switch length {
 		case 0:
 			return keyFlagEmpty
 		case 1:
-			return getKeyFlag(keyFlag.Elem())
+			return getKeyFlag(keyType.Elem())
 		default:
-			elemkeyFlag := getKeyFlag(keyFlag.Elem())
+			elemkeyFlag := getKeyFlag(keyType.Elem())
 			if elemkeyFlag == keyFlagFastStr {
 				return keyFlagNormal
 			}
 			return elemkeyFlag
 		}
 	case reflect.Struct:
-		n := keyFlag.NumField()
+		n := keyType.NumField()
 		result := int8(keyFlagEmpty)
+		var size uintptr
 		for i := 0; i < n; i++ {
-			fieldkeyFlag := getKeyFlag(keyFlag.Field(i).Type)
-			if fieldkeyFlag == keyFlagEmpty {
+			field := keyType.Field(i)
+			size += field.Type.Size()
+			fieldKeyFlag := getKeyFlag(field.Type)
+			if fieldKeyFlag == keyFlagEmpty {
 				continue
 			}
 			if result == keyFlagEmpty {
-				result = fieldkeyFlag
+				result = fieldKeyFlag
 				continue
 			}
-			if result != fieldkeyFlag {
+			if result != fieldKeyFlag {
 				return keyFlagNormal
 			}
 			// 出现多个str，不能用fastStr
@@ -124,13 +129,16 @@ func getKeyFlag(keyFlag reflect.Type) int8 {
 				return keyFlagNormal
 			}
 		}
+		if size != keyType.Size() {
+			return keyFlagNormal
+		}
 		return result
 	default:
 		return keyFlagNormal
 	}
 }
 
-func getMapHelper(mapType reflect.Type) *runtimeMapHelper {
+func newMapHelper(mapType reflect.Type) *runtimeMapHelper {
 	return newRuntimeMapHelper(mapType)
 }
 
@@ -138,8 +146,6 @@ type runtimeMapHelper struct {
 	keyFlag     uint8
 	mapTypePtr  unsafe.Pointer
 	elemTypePtr unsafe.Pointer
-	keyType     reflect.Type
-	elemType    reflect.Type
 }
 
 func newRuntimeMapHelper(mapType reflect.Type) *runtimeMapHelper {
@@ -173,18 +179,14 @@ func newRuntimeMapHelper(mapType reflect.Type) *runtimeMapHelper {
 		keyFlag:     keyFlag,
 		mapTypePtr:  typePtr(mapType),
 		elemTypePtr: typePtr(mapType.Elem()),
-		keyType:     mapType.Key(),
-		elemType:    mapType.Elem(),
 	}
 }
 
-func (h *runtimeMapHelper) Make(mapAddr unsafe.Pointer, n int) map[any]any {
-	m := makeMap(h.mapTypePtr, n, nil)
-	*(*map[any]any)(mapAddr) = m
-	return m
+func (h *runtimeMapHelper) Make(n int) map[any]any {
+	return makeMap(h.mapTypePtr, n, nil)
 }
 
-func (h *runtimeMapHelper) Load(m map[any]any, key unsafe.Pointer, valueHasRef bool) (v unsafe.Pointer, ok bool) {
+func (h *runtimeMapHelper) Load(m map[any]any, key unsafe.Pointer) (v unsafe.Pointer, ok bool) {
 	switch keyFlag := h.keyFlag; keyFlag {
 	case keyFlagFastStr:
 		v, ok = mapAccess2FastStr(h.mapTypePtr, m, *(*string)(key))
@@ -198,39 +200,31 @@ func (h *runtimeMapHelper) Load(m map[any]any, key unsafe.Pointer, valueHasRef b
 	if !ok {
 		return nil, false
 	}
-	if valueHasRef {
-		v = copyObject(h.elemType, v)
-	}
 	return v, true
 }
 
 func (h *runtimeMapHelper) Store(m map[any]any, key, value unsafe.Pointer) {
 	switch keyFlag := h.keyFlag; keyFlag {
 	case keyFlagFastStr:
-		typedmemmove(h.elemTypePtr, mapAssignFastStr(h.mapTypePtr, m, *(*string)(key)), value)
+		typedMemMove(h.elemTypePtr, mapAssignFastStr(h.mapTypePtr, m, *(*string)(key)), value)
 	case keyFlagFast32:
-		typedmemmove(h.elemTypePtr, mapAssignFast32(h.mapTypePtr, m, *(*uint32)(key)), value)
+		typedMemMove(h.elemTypePtr, mapAssignFast32(h.mapTypePtr, m, *(*uint32)(key)), value)
 	case keyFlagFast32Ptr:
-		typedmemmove(h.elemTypePtr, mapAssignFast32Ptr(h.mapTypePtr, m, *(*unsafe.Pointer)(key)), value)
+		typedMemMove(h.elemTypePtr, mapAssignFast32Ptr(h.mapTypePtr, m, *(*unsafe.Pointer)(key)), value)
 	case keyFlagFast64:
-		typedmemmove(h.elemTypePtr, mapAssignFast64(h.mapTypePtr, m, *(*uint64)(key)), value)
+		typedMemMove(h.elemTypePtr, mapAssignFast64(h.mapTypePtr, m, *(*uint64)(key)), value)
 	case keyFlagFast64Ptr:
-		typedmemmove(h.elemTypePtr, mapAssignFast64Ptr(h.mapTypePtr, m, *(*unsafe.Pointer)(key)), value)
+		typedMemMove(h.elemTypePtr, mapAssignFast64Ptr(h.mapTypePtr, m, *(*unsafe.Pointer)(key)), value)
 	default:
-		typedmemmove(h.elemTypePtr, mapAssign(h.mapTypePtr, m, key), value)
+		typedMemMove(h.elemTypePtr, mapAssign(h.mapTypePtr, m, key), value)
 	}
 }
 
-func (h *runtimeMapHelper) Range(m map[any]any, f func(key, value unsafe.Pointer) bool, keyHasRef, valueHasRef bool) {
+func (h *runtimeMapHelper) Range(m map[any]any, f func(key, value unsafe.Pointer) bool) {
 	var iter hiter
-	for mapIterInit(h.mapTypePtr, m, noEscapePtr(&iter)); iter.key != nil; mapIterNext(noEscapePtr(&iter)) {
+	ptr := noEscapePtr(&iter)
+	for mapIterInit(h.mapTypePtr, m, ptr); iter.key != nil; mapIterNext(ptr) {
 		k, v := iter.key, iter.elem
-		if keyHasRef {
-			k = copyObject(h.keyType, k)
-		}
-		if valueHasRef {
-			v = copyObject(h.elemType, v)
-		}
 		if !f(k, v) {
 			return
 		}

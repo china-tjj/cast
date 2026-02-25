@@ -10,7 +10,7 @@ import (
 	"unsafe"
 )
 
-func getInterfaceCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
+func getInterfaceCaster(s *Scope, fromType, toType reflect.Type) (castFunc, uint8) {
 	fromKind := fromType.Kind()
 	if toType.NumMethod() == 0 {
 		if fromKind == reflect.Interface {
@@ -21,18 +21,18 @@ func getInterfaceCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool
 				return func(fromAddr, toAddr unsafe.Pointer) error {
 					*(*any)(toAddr) = *(*any)(fromAddr)
 					return nil
-				}, false
+				}, 0
 			} else {
 				return func(fromAddr, toAddr unsafe.Pointer) error {
 					*(*any)(toAddr) = *(*iface)(fromAddr)
 					return nil
-				}, false
+				}, 0
 			}
 		}
 		if s.deepCopy {
 			copier, _ := getCaster(s, fromType, fromType)
 			if copier == nil {
-				return nil, false
+				return nil, 0
 			}
 			if isPtrType(fromType) {
 				return func(fromAddr, toAddr unsafe.Pointer) error {
@@ -42,7 +42,7 @@ func getInterfaceCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool
 					}
 					*(*any)(toAddr) = packEface(fromType, *(*unsafe.Pointer)(copied))
 					return nil
-				}, false
+				}, 0
 			}
 			return func(fromAddr, toAddr unsafe.Pointer) error {
 				copied := newObject(fromType)
@@ -51,18 +51,18 @@ func getInterfaceCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool
 				}
 				*(*any)(toAddr) = packEface(fromType, copied)
 				return nil
-			}, false
+			}, 0
 		}
 		if isPtrType(fromType) {
 			return func(fromAddr, toAddr unsafe.Pointer) error {
 				*(*any)(toAddr) = packEface(fromType, *(*unsafe.Pointer)(fromAddr))
 				return nil
-			}, false
+			}, 0
 		}
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			*(*any)(toAddr) = packEface(fromType, fromAddr)
 			return nil
-		}, true
+		}, flagHasRef
 	}
 
 	if fromKind == reflect.Interface {
@@ -72,17 +72,17 @@ func getInterfaceCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			reflect.NewAt(toType, toAddr).Elem().Set(reflect.NewAt(fromType, fromAddr).Elem())
 			return nil
-		}, false
+		}, 0
 	}
 
 	if !fromType.Implements(toType) {
-		return nil, false
+		return nil, 0
 	}
 
 	if s.deepCopy {
 		copier, _ := getCaster(s, fromType, fromType)
 		if copier == nil {
-			return nil, false
+			return nil, 0
 		}
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			copied := newObject(fromType)
@@ -91,10 +91,10 @@ func getInterfaceCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool
 			}
 			reflect.NewAt(toType, toAddr).Elem().Set(reflect.NewAt(fromType, copied).Elem())
 			return nil
-		}, false
+		}, 0
 	}
 	return func(fromAddr, toAddr unsafe.Pointer) error {
 		reflect.NewAt(toType, toAddr).Elem().Set(reflect.NewAt(fromType, fromAddr).Elem())
 		return nil
-	}, false
+	}, 0
 }

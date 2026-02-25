@@ -12,9 +12,11 @@ import (
 )
 
 type Scope struct {
-	casterMap map[casterKey]casterValue
-	mu        sync.RWMutex // 读多写少的场景，sync.RWMutex的效率比sync.Map更高
-	frozen    bool
+	casterCache          cache
+	casterMap            map[casterKey]casterValue
+	mu                   sync.RWMutex // 读多写少的场景，sync.RWMutex的效率比sync.Map更高
+	frozen               bool
+	definedFromAnyCaster bool
 
 	disableZeroCopy bool // 禁用零拷贝
 	deepCopy        bool // 深拷贝
@@ -24,6 +26,18 @@ type Scope struct {
 
 func (s *Scope) DisableZeroCopy() bool {
 	return s.disableZeroCopy
+}
+
+func (s *Scope) DeepCopy() bool {
+	return s.deepCopy
+}
+
+func (s *Scope) CastUnexported() bool {
+	return s.castUnexported
+}
+
+func (s *Scope) StrictNilCheck() bool {
+	return s.strictNilCheck
 }
 
 type ScopeOption func(s *Scope)
@@ -51,8 +65,48 @@ func SetDefaultScope(s *Scope) {
 }
 
 // ToWithScope 将任意类型转为T，转换规则详见README
-func ToWithScope[T any](s *Scope, from any) (T, error) {
-	return CastWithScope[any, T](s, from)
+func ToWithScope[T any](s *Scope, from any) (to T, err error) {
+	if s.definedFromAnyCaster {
+		return CastWithScope[any, T](s, from)
+	}
+	toType := typeFor[T]()
+	if !s.deepCopy || !isRefType(toType) {
+		if tmp, ok := from.(T); ok {
+			return tmp, nil
+		}
+	}
+	// 当from包含指针时，这部分指针指向的内容会逃逸
+	escape(from)
+	if toType.Kind() == reflect.Interface {
+		caster, _ := getInterfaceCaster(s, anyType, toType)
+		if caster == nil {
+			return to, invalidCastErr(s, anyType, toType)
+		}
+		err = caster(noEscape(unsafe.Pointer(&from)), noEscape(unsafe.Pointer(&to)))
+		return to, err
+	}
+	fromElemTypePtr, fromElemAddr := unpackEface(from)
+	fromElemType := typePtrToType(fromElemTypePtr)
+	if fromElemTypePtr == nil {
+		if s.strictNilCheck && !isNilableType(toType) {
+			return to, invalidCastErr(s, fromElemType, toType)
+		}
+		return to, nil
+	}
+	caster, flag := getCaster(s, fromElemType, toType)
+	if caster == nil {
+		return to, invalidCastErr(s, fromElemType, toType)
+	}
+	trueFromElemAddr := fromElemAddr
+	if isPtrType(fromElemType) {
+		// 接口存指针时，eface 的指针会指针拷贝这个指针，故需要再取一次地址
+		trueFromElemAddr = noEscape(unsafe.Pointer(&fromElemAddr))
+	} else if isHasRef(flag) {
+		// 接口存非指针时，eface 的指针指向的内存是只读的，若有指针指向该块内存，需拷贝
+		trueFromElemAddr = copyObject(fromElemType, trueFromElemAddr)
+	}
+	err = caster(trueFromElemAddr, noEscape(unsafe.Pointer(&to)))
+	return to, err
 }
 
 // CastWithScope 将类型F转为T，转换规则详见README
@@ -138,7 +192,10 @@ func WithCaster[F any, T any](caster func(s *Scope, from F) (to T, err error)) S
 				return err
 			}
 		}
-		s.casterMap[key] = casterValue{wrappedCaster, false}
+		s.casterMap[key] = casterValue{wrappedCaster, flagCustom}
+		if fromType == anyType {
+			s.definedFromAnyCaster = true
+		}
 	}
 }
 

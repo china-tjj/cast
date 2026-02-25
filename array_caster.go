@@ -10,26 +10,26 @@ import (
 	"unsafe"
 )
 
-func getArrayCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
+func getArrayCaster(s *Scope, fromType, toType reflect.Type) (castFunc, uint8) {
 	switch fromType.Kind() {
 	case reflect.Array:
 		fromElemType := fromType.Elem()
 		toElemType := toType.Elem()
 		if isRefAble(s, fromElemType, toElemType) {
 			var arrayTypePtr unsafe.Pointer
-			if fromType.Len() <= toElemType.Len() {
+			if fromType.Len() <= toType.Len() {
 				arrayTypePtr = typePtr(fromType)
 			} else {
 				arrayTypePtr = typePtr(toType)
 			}
 			return func(fromAddr, toAddr unsafe.Pointer) error {
-				typedmemmove(arrayTypePtr, toAddr, fromAddr)
+				typedMemMove(arrayTypePtr, toAddr, fromAddr)
 				return nil
-			}, false
+			}, 0
 		}
-		elemCaster, hasRef := getCaster(s, fromElemType, toElemType)
+		elemCaster, flag := getCaster(s, fromElemType, toElemType)
 		if elemCaster == nil {
-			return nil, false
+			return nil, 0
 		}
 		length := min(fromType.Len(), toType.Len())
 		fromElemSize := fromElemType.Size()
@@ -38,12 +38,12 @@ func getArrayCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			for i := 0; i < length; i++ {
 				if err := elemCaster(offset(fromAddr, i, fromElemSize), offset(toAddr, i, toElemSize)); err != nil {
-					typedmemmove(typePtr(toType), toAddr, zeroPtr)
+					typedMemMove(typePtr(toType), toAddr, zeroPtr)
 					return err
 				}
 			}
 			return nil
-		}, hasRef
+		}, flag
 	case reflect.Interface:
 		return getUnpackInterfaceCaster(s, fromType, toType)
 	case reflect.Pointer:
@@ -55,33 +55,53 @@ func getArrayCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 			toElemTypePtr := typePtr(toElemType)
 			toLen := toType.Len()
 			return func(fromAddr, toAddr unsafe.Pointer) error {
-				from := *(*slice)(fromAddr)
-				typedslicecopy(toElemTypePtr, toAddr, toLen, from.data, from.len)
+				fromPtr := (*slice)(fromAddr)
+				typedSliceCopy(toElemTypePtr, toAddr, toLen, fromPtr.data, fromPtr.len)
 				return nil
-			}, false
+			}, 0
 		}
 		elemCaster, _ := getCaster(s, fromElemType, toElemType)
 		if elemCaster == nil {
-			return nil, false
+			return nil, 0
 		}
 		fromElemSize := fromElemType.Size()
 		toElemSize := toElemType.Size()
-		toLen := toElemType.Len()
+		toLen := toType.Len()
 		zeroPtr := getZeroPtr(toType)
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			from := *(*slice)(fromAddr)
 			length := min(from.len, toLen)
 			for i := 0; i < length; i++ {
 				if err := elemCaster(offset(from.data, i, fromElemSize), offset(toAddr, i, toElemSize)); err != nil {
-					typedmemmove(typePtr(toType), toAddr, zeroPtr)
+					typedMemMove(typePtr(toType), toAddr, zeroPtr)
 					return err
 				}
 			}
 			return nil
-		}, false
+		}, 0
 	case reflect.String:
-		return getFromStringAsSliceCaster(s, toType)
+		switch toType.Elem().Kind() {
+		case reflect.Int32:
+			toLen := toType.Len()
+			toElemTypePtr := typePtr(toType.Elem())
+			return func(fromAddr, toAddr unsafe.Pointer) error {
+				fromRunes := []rune(*(*string)(fromAddr))
+				fromRunesPtr := (*slice)(unsafe.Pointer(&fromRunes))
+				typedSliceCopy(toElemTypePtr, toAddr, toLen, fromRunesPtr.data, fromRunesPtr.len)
+				return nil
+			}, 0
+		case reflect.Uint8:
+			toLen := toType.Len()
+			toElemTypePtr := typePtr(toType.Elem())
+			return func(fromAddr, toAddr unsafe.Pointer) error {
+				fromPtr := (*str)(fromAddr)
+				typedSliceCopy(toElemTypePtr, toAddr, toLen, fromPtr.data, fromPtr.len)
+				return nil
+			}, 0
+		default:
+			return nil, 0
+		}
 	default:
-		return getStringAsBridgeCaster(s, fromType, toType)
+		return nil, 0
 	}
 }

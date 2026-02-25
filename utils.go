@@ -7,7 +7,10 @@ package cast
 
 import (
 	"reflect"
+	"strings"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 	"unsafe"
 )
 
@@ -48,7 +51,8 @@ func isMemSame(s *Scope, fromType, toType reflect.Type) bool {
 		}
 		return true
 	case reflect.Interface:
-		return fromType.Implements(toType) && toType.Implements(fromType)
+		// 空接口（eface）的第一个字是 *_type，所以只依赖具体类型；非空接口（iface）的第一个字是 *itab，而 itab 是 (interface type, concrete type) 的组合，里面还包含接口类型指针和该接口的方法表
+		return fromType == toType || (fromType.NumMethod() == 0 && toType.NumMethod() == 0)
 	case reflect.Map:
 		return isMemSame(s, fromType.Key(), toType.Key()) && isMemSame(s, fromType.Elem(), toType.Elem())
 	case reflect.Pointer, reflect.Slice:
@@ -64,9 +68,15 @@ func isMemSame(s *Scope, fromType, toType reflect.Type) bool {
 			if !s.castUnexported && (!fromField.IsExported() || !toField.IsExported()) {
 				return false
 			}
-			fromJsonTag, ok1 := fromField.Tag.Lookup("json")
-			toJsonTag, ok2 := toField.Tag.Lookup("json")
-			if fromField.Name != toField.Name || (ok1 && ok2 && fromJsonTag != toJsonTag) {
+			fromName, skip1 := getFieldName(&fromField)
+			if skip1 {
+				return false
+			}
+			toName, skip2 := getFieldName(&toField)
+			if skip2 {
+				return false
+			}
+			if !(fromName == toName || foldNameStr(fromName) == foldNameStr(toName)) {
 				return false
 			}
 			if !isMemSame(s, fromField.Type, toField.Type) {
@@ -76,6 +86,57 @@ func isMemSame(s *Scope, fromType, toType reflect.Type) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func getFieldName(field *reflect.StructField) (string, bool) {
+	if castTag := field.Tag.Get("cast"); castTag == "-" {
+		return "", true
+	} else if castTag != "" {
+		return strings.Split(castTag, ",")[0], false
+	} else if jsonTag := field.Tag.Get("json"); jsonTag == "-" {
+		return "", false
+	} else if jsonTag != "" {
+		return strings.Split(jsonTag, ",")[0], false
+	}
+	return field.Name, false
+}
+
+func foldNameStr(in string) string {
+	return toString(foldName(toBytes(in)))
+}
+
+func foldName(in []byte) []byte {
+	var arr [32]byte
+	return appendFoldedName(arr[:0], in)
+}
+
+func appendFoldedName(out, in []byte) []byte {
+	for i := 0; i < len(in); {
+		if c := in[i]; c < utf8.RuneSelf {
+			if c != '_' && c != '-' {
+				if 'a' <= c && c <= 'z' {
+					c -= 'a' - 'A'
+				}
+				out = append(out, c)
+			}
+			i++
+			continue
+		}
+		r, n := utf8.DecodeRune(in[i:])
+		out = utf8.AppendRune(out, foldRune(r))
+		i += n
+	}
+	return out
+}
+
+func foldRune(r rune) rune {
+	for {
+		r2 := unicode.SimpleFold(r)
+		if r2 <= r {
+			return r2
+		}
+		r = r2
 	}
 }
 
@@ -185,9 +246,6 @@ func isRefType(typ reflect.Type) bool {
 }
 
 func isPtrType(typ reflect.Type) bool {
-	if typ == nil {
-		return false
-	}
 	switch typ.Kind() {
 	// chan、map、func 其实就是一个指针
 	case reflect.Chan, reflect.Func, reflect.Map, reflect.Pointer, reflect.UnsafePointer:
@@ -219,28 +277,28 @@ func offset(data unsafe.Pointer, idx int, elemSize uintptr) unsafe.Pointer {
 	return unsafe.Add(data, uintptr(idx)*elemSize)
 }
 
-//go:linkname typedmemmove runtime.typedmemmove
-func typedmemmove(typ, dst, src unsafe.Pointer)
+//go:linkname typedMemMove runtime.typedmemmove
+func typedMemMove(typ, dst, src unsafe.Pointer)
 
-//go:linkname typedslicecopy runtime.typedslicecopy
-func typedslicecopy(typ, dstPtr unsafe.Pointer, dstLen int, srcPtr unsafe.Pointer, srcLen int) int
+//go:linkname typedSliceCopy runtime.typedslicecopy
+func typedSliceCopy(typ, dstPtr unsafe.Pointer, dstLen int, srcPtr unsafe.Pointer, srcLen int) int
 
-//go:linkname mallocgc runtime.mallocgc
-func mallocgc(size uintptr, typ unsafe.Pointer, needzero bool) unsafe.Pointer
+//go:linkname mallocGC runtime.mallocgc
+func mallocGC(size uintptr, typ unsafe.Pointer, needzero bool) unsafe.Pointer
 
 func newObject(typ reflect.Type) unsafe.Pointer {
-	return mallocgc(typ.Size(), typePtr(typ), true)
+	return mallocGC(typ.Size(), typePtr(typ), true)
 }
 
 func copyObject(typ reflect.Type, ptr unsafe.Pointer) unsafe.Pointer {
 	tp := typePtr(typ)
-	copiedPtr := mallocgc(typ.Size(), tp, true)
-	typedmemmove(tp, copiedPtr, ptr)
+	copiedPtr := mallocGC(typ.Size(), tp, true)
+	typedMemMove(tp, copiedPtr, ptr)
 	return copiedPtr
 }
 
-//go:linkname newarray runtime.newarray
-func newarray(typ unsafe.Pointer, n int) unsafe.Pointer
+//go:linkname newArray runtime.newarray
+func newArray(typ unsafe.Pointer, n int) unsafe.Pointer
 
 type slice struct {
 	data unsafe.Pointer
@@ -250,7 +308,7 @@ type slice struct {
 
 func makeSlice(elemType reflect.Type, len, cap int) slice {
 	return slice{
-		data: newarray(typePtr(elemType), cap),
+		data: newArray(typePtr(elemType), cap),
 		len:  len,
 		cap:  cap,
 	}
@@ -276,25 +334,6 @@ func toString(b []byte) (s string) {
 	to.data = from.data
 	to.len = from.len
 	return
-}
-
-func isSpecialHash(typ reflect.Type) bool {
-	switch typ.Kind() {
-	case reflect.Array:
-		return typ.Len() > 0 && isSpecialHash(typ.Elem())
-	case reflect.String, reflect.Interface:
-		return true
-	case reflect.Struct:
-		n := typ.NumField()
-		for i := 0; i < n; i++ {
-			if isSpecialHash(typ.Field(i).Type) {
-				return true
-			}
-		}
-		return false
-	default:
-		return false
-	}
 }
 
 func getFinalElem(typ reflect.Type) (int, reflect.Type) {
@@ -336,11 +375,12 @@ func getZeroPtr(typ reflect.Type) unsafe.Pointer {
 }
 
 type structField struct {
-	name              string
-	jsonTag           string
-	offset            uintptr
-	typ               reflect.Type
-	isAnonymousStruct bool
+	rawName    string // 原始字段名，仅打error用
+	name       string // 一定非空
+	foldedName string // 可能为空，为空说明是名称重复
+	offset     uintptr
+	typ        reflect.Type
+	isRequired bool
 	// 嵌套结构体指针相关字段
 	parent        *structField
 	parentElemTyp reflect.Type
@@ -369,89 +409,132 @@ func (f *structField) getAddrSlow(addr unsafe.Pointer, newIfNil bool) unsafe.Poi
 	return unsafe.Add(addr, f.offset)
 }
 
-func getAllFields(s *Scope, typ reflect.Type) ([]*structField, map[string]*structField, map[string]*structField) {
-	return getAllFieldsInner(s, typ, 0, nil)
+type structFields struct {
+	flattened    []*structField
+	byActualName map[string]*structField
+	byFoldedName map[string]*structField
 }
 
-func getAllFieldsInner(s *Scope, typ reflect.Type, offset uintptr, parent *structField) ([]*structField, map[string]*structField, map[string]*structField) {
+var fieldCache sync.Map
+
+type fieldCacheKey struct {
+	castUnexported bool
+	typ            reflect.Type
+}
+
+// 获取结构体的所有字段，包括提升的
+func getAllFields(s *Scope, typ reflect.Type) structFields {
+	key := fieldCacheKey{
+		castUnexported: s.castUnexported,
+		typ:            typ,
+	}
+	if f, ok := fieldCache.Load(key); ok {
+		return f.(structFields)
+	}
+	f, _ := fieldCache.LoadOrStore(key, getAllFieldsInner(s, typ, 0, nil, make(map[reflect.Type]struct{})))
+	return f.(structFields)
+}
+
+func getAllFieldsInner(s *Scope, typ reflect.Type, offset uintptr, parent *structField, visited map[reflect.Type]struct{}) structFields {
+	if _, v := visited[typ]; v {
+		return structFields{}
+	}
+	visited[typ] = struct{}{}
+
 	n := typ.NumField()
 	fields := make([]*structField, 0, n)
 	var anonymousFields []*structField
 	nameMap := make(map[string]*structField, n)
-	jsonTagMap := make(map[string]*structField, n)
+	foldedNameMap := make(map[string]*structField, n)
+	foldedNameCandidateMap := make(map[string][]*structField, n)
 	anonymousNameMap := make(map[string][]*structField)
-	anonymousJsonTagMap := make(map[string][]*structField)
+	anonymousFoldedNameMap := make(map[string][]*structField)
+
 	for i := 0; i < n; i++ {
 		reflectField := typ.Field(i)
 		if !s.castUnexported && !reflectField.IsExported() {
 			continue
 		}
 		field := &structField{
-			offset: offset + reflectField.Offset,
-			name:   reflectField.Name,
-			typ:    reflectField.Type,
+			rawName: reflectField.Name,
+			offset:  offset + reflectField.Offset,
+			typ:     reflectField.Type,
 		}
 		if parent != nil {
 			field.parent = parent
 			field.parentElemTyp = parent.typ.Elem()
 		}
+		if castTag := typ.Field(i).Tag.Get("cast"); castTag == "-" {
+			continue
+		} else if castTag != "" {
+			values := strings.Split(castTag, ",")
+			field.name = values[0]
+			for _, value := range values[1:] {
+				switch value {
+				case "required":
+					field.isRequired = true
+				default:
+					break
+				}
+			}
+		} else if jsonTag := typ.Field(i).Tag.Get("json"); jsonTag != "" && jsonTag != "-" {
+			field.name = strings.Split(jsonTag, ",")[0]
+		}
+		if field.name == "" && reflectField.Anonymous {
+			if field.typ.Kind() == reflect.Struct {
+				subFields := getAllFieldsInner(s, field.typ, field.offset, nil, visited)
+				for _, anonymousField := range subFields.flattened {
+					anonymousFields = append(anonymousFields, anonymousField)
+					name, foldedName := anonymousField.name, anonymousField.foldedName
+					anonymousNameMap[name] = append(anonymousNameMap[name], anonymousField)
+					if anonymousField.foldedName == "" {
+						continue
+					}
+					anonymousFoldedNameMap[foldedName] = append(anonymousFoldedNameMap[foldedName], anonymousField)
+				}
+				continue
+			} else if field.typ.Kind() == reflect.Ptr && field.typ.Elem().Kind() == reflect.Struct {
+				subFields := getAllFieldsInner(s, field.typ.Elem(), 0, field, visited)
+				for _, anonymousField := range subFields.flattened {
+					anonymousFields = append(anonymousFields, anonymousField)
+					name, foldedName := anonymousField.name, anonymousField.foldedName
+					anonymousNameMap[name] = append(anonymousNameMap[name], anonymousField)
+					if anonymousField.foldedName == "" {
+						continue
+					}
+					anonymousFoldedNameMap[foldedName] = append(anonymousFoldedNameMap[foldedName], anonymousField)
+				}
+				continue
+			}
+		}
+		if field.name == "" {
+			field.name = reflectField.Name
+		}
+		field.foldedName = foldNameStr(field.name)
 		fields = append(fields, field)
 		nameMap[field.name] = field
-		if jsonTag, ok := typ.Field(i).Tag.Lookup("json"); ok {
-			field.jsonTag = jsonTag
-			jsonTagMap[field.jsonTag] = field
+		foldedNameCandidateMap[field.foldedName] = append(foldedNameCandidateMap[field.foldedName], field)
+	}
+
+	for foldedName, candidates := range foldedNameCandidateMap {
+		if len(candidates) == 1 {
+			foldedNameMap[foldedName] = candidates[0]
 		}
-		if !reflectField.Anonymous {
+	}
+
+	for _, anonymousField := range anonymousFields {
+		name := anonymousField.name
+		if _, ok := nameMap[name]; ok || len(anonymousNameMap[name]) != 1 {
 			continue
 		}
-		if field.typ.Kind() == reflect.Struct {
-			field.isAnonymousStruct = true
-			anonymousFieldList, _, _ := getAllFieldsInner(s, field.typ, field.offset, nil)
-			for _, anonymousField := range anonymousFieldList {
-				anonymousFields = append(anonymousFields, anonymousField)
-				name, jsonTag := anonymousField.name, anonymousField.jsonTag
-				anonymousNameMap[name] = append(anonymousNameMap[name], anonymousField)
-				if anonymousField.jsonTag == "" {
-					continue
-				}
-				anonymousJsonTagMap[jsonTag] = append(anonymousJsonTagMap[jsonTag], anonymousField)
-			}
-		} else if field.typ.Kind() == reflect.Ptr && field.typ.Elem().Kind() == reflect.Struct {
-			field.isAnonymousStruct = true
-			anonymousFieldList, _, _ := getAllFieldsInner(s, field.typ.Elem(), 0, field)
-			for _, anonymousField := range anonymousFieldList {
-				anonymousFields = append(anonymousFields, anonymousField)
-				name, jsonTag := anonymousField.name, anonymousField.jsonTag
-				anonymousNameMap[name] = append(anonymousNameMap[name], anonymousField)
-				if anonymousField.jsonTag == "" {
-					continue
-				}
-				anonymousJsonTagMap[jsonTag] = append(anonymousJsonTagMap[jsonTag], anonymousField)
-			}
+		nameMap[name] = anonymousField
+		fields = append(fields, anonymousField)
+		foldedName := anonymousField.foldedName
+		if _, ok := foldedNameMap[foldedName]; ok && len(anonymousFoldedNameMap[foldedName]) != 1 {
+			anonymousField.foldedName = ""
+			continue
 		}
+		foldedNameMap[foldedName] = anonymousField
 	}
-	for _, anonymousField := range anonymousFields {
-		name, jsonTag := anonymousField.name, anonymousField.jsonTag
-		nameOk, jsonTagOk := false, false
-		if _, ok := nameMap[name]; !ok && len(anonymousNameMap[name]) == 1 {
-			nameMap[name] = anonymousField
-			nameOk = true
-		}
-		if jsonTag != "" {
-			if _, ok := jsonTagMap[jsonTag]; !ok && len(anonymousJsonTagMap[jsonTag]) == 1 {
-				jsonTagMap[jsonTag] = anonymousField
-				jsonTagOk = true
-			}
-		}
-		if nameOk && jsonTagOk {
-			fields = append(fields, anonymousField)
-		} else if nameOk { // && !jsonTagOk
-			anonymousField.jsonTag = ""
-			fields = append(fields, anonymousField)
-		} else if jsonTagOk { // && !nameOk
-			anonymousField.name = ""
-			fields = append(fields, anonymousField)
-		}
-	}
-	return fields, nameMap, jsonTagMap
+	return structFields{fields, nameMap, foldedNameMap}
 }

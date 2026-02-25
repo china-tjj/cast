@@ -1,7 +1,6 @@
 package cast
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"runtime"
@@ -114,6 +113,37 @@ func TestFuncCast(t *testing.T) {
 	if c != "3" {
 		t.Fatal(c)
 	}
+
+	strAdd2, err := Cast[func(a int, b int) int, func(a string, b string) (string, error)](add)
+	if err != nil {
+		t.Fatal()
+	}
+	c, err = strAdd2("1", "2")
+	if c != "3" || err != nil {
+		t.Fatal(c, err)
+	}
+	c, err = strAdd2("1", "abc")
+	if err == nil || err.Error() != `cast in arg 1 from string to int failed: strconv.ParseInt: parsing "abc": invalid syntax` {
+		t.Fatal(err)
+	}
+}
+
+func TestSliceFuncCast(t *testing.T) {
+	add := func(a int, b int, others ...int) int {
+		res := a + b
+		for _, v := range others {
+			res += v
+		}
+		return res
+	}
+	strAdd, err := Cast[func(a int, b int, others ...int) int, func(a string, b string, others ...string) string](add)
+	if err != nil {
+		t.Fatal()
+	}
+	c := strAdd("1", "2", "3", "4")
+	if c != "10" {
+		t.Fatal(c)
+	}
 }
 
 type I interface {
@@ -163,6 +193,93 @@ func TestNilAnyCast(t *testing.T) {
 	}
 }
 
+type S1 struct {
+	*S2
+	V1 int
+}
+type S2 struct {
+	*S1
+	V2 int
+}
+
+type S3 struct {
+	*S1 `cast:"S1"`
+	V3  int
+}
+
+func TestSelfAnonymousStruct(t *testing.T) {
+	s1 := &S1{
+		V1: 1,
+		S2: &S2{
+			V2: 2,
+			S1: &S1{
+				V1: 3,
+			},
+		},
+	}
+	m1, err := To[map[string]any](s1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(m1, map[string]any{"V1": 1, "V2": 2}) {
+		t.Fatal()
+	}
+
+	s3 := &S3{
+		V3: 3,
+		S1: &S1{
+			V1: 1,
+		},
+	}
+	m3, err := To[map[string]any](s3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(m3, map[string]any{"V3": 3, "S1": &S1{V1: 1}}) {
+		t.Fatal()
+	}
+}
+
+func TestInternalHack(t *testing.T) {
+	type S struct {
+		V int
+	}
+	m, err := To[map[*string]any](S{})
+	if err != nil || len(m) == 0 {
+		t.Fatal(err)
+	}
+	for k := range m {
+		*k = "hack"
+	}
+	m, err = To[map[*string]any](S{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k := range m {
+		if *k != "V" {
+			t.Fatal(*k)
+		}
+	}
+}
+
+type IntValue int
+
+func (i IntValue) String() string {
+	return fmt.Sprintf("value_%d", i)
+}
+
+type Struct struct {
+	Value1 int `cast:"value_1"`
+}
+
+func TestMapToStruct(t *testing.T) {
+	m := map[IntValue]int{1: 1}
+	s, err := To[Struct](m)
+	if err != nil || s.Value1 != 1 {
+		t.Fatal(err)
+	}
+}
+
 func TestCast(t *testing.T) {
 	type S1 struct {
 		A int
@@ -194,6 +311,8 @@ func TestCast(t *testing.T) {
 		{
 			[1]int{123},
 			[]int{123},
+			[1]int32{123},
+			[]int32{123},
 		},
 		{
 			ptr4(
@@ -224,15 +343,19 @@ func TestCast(t *testing.T) {
 		{
 			"一二三",
 			[]byte("一二三"),
+			*(*[9]byte)([]byte("一二三")),
 		},
 		{
 			"一二三",
 			[]rune("一二三"),
+			*(*[3]rune)([]rune("一二三")),
 		},
 		{
 			"123",
 			[]byte("123"),
 			[]rune("123"),
+			*(*[3]byte)([]byte("123")),
+			*(*[3]rune)([]rune("123")),
 		},
 		{
 			map[string]bool{"1": true, "2": true, "3": true},
@@ -245,8 +368,8 @@ func TestCast(t *testing.T) {
 			map[uintptr]bool{1: true, 2: true, 3: true},
 		},
 		{
-			ptr(any(errors.New("123"))),
-			ptr(errors.New("123")),
+			ptr(any(error(strErr("123")))),
+			ptr(error(strErr("123"))),
 		},
 		{
 			S2{S1{1}, 2},
@@ -258,29 +381,31 @@ func TestCast(t *testing.T) {
 			},
 		},
 	}
-	for _, group := range equalGroups {
-		for i := 0; i < len(group); i++ {
-			for j := 0; j < len(group); j++ {
-				func() {
-					a, b := group[i], group[j]
-					defer func() {
-						if r := recover(); r != nil {
-							const size = 64 << 10
-							buf := make([]byte, size)
-							buf = buf[:runtime.Stack(buf, false)]
-							t.Fatal(fmt.Sprintf("cast %T(%+v) to %T(%+v) panic: \nerror: %v\nstack: %s", a, a, b, b, r, buf))
+	testScopes := []*Scope{defaultScope, deepCopyScope}
+	for _, s := range testScopes {
+		for _, group := range equalGroups {
+			for _, a := range group {
+				for _, b := range group {
+					func() {
+						defer func() {
+							if r := recover(); r != nil {
+								const size = 64 << 10
+								buf := make([]byte, size)
+								buf = buf[:runtime.Stack(buf, false)]
+								t.Fatal(fmt.Sprintf("cast %T(%+v) to %T(%+v) panic: \nerror: %v\nstack: %s", a, a, b, b, r, buf))
+							}
+						}()
+						res, err := ReflectCastWithScope(s, reflect.ValueOf(a), reflect.TypeOf(b))
+						if err != nil {
+							t.Fatal(fmt.Sprintf("cast %T(%+v) to %T(%+v) error: %v", a, a, b, b, err))
+						}
+						v := res.Interface()
+						if !reflect.DeepEqual(v, b) {
+							t.Fatal(fmt.Sprintf("cast %T(%+v) to %T(%+v) not equal, casted value is %T(%+v)",
+								a, a, b, b, v, v))
 						}
 					}()
-					res, err := ReflectCast(reflect.ValueOf(a), reflect.TypeOf(b))
-					if err != nil {
-						t.Fatal(fmt.Sprintf("cast %T(%+v) to %T(%+v) error: %v", a, a, b, b, err))
-					}
-					v := res.Interface()
-					if !reflect.DeepEqual(v, b) {
-						t.Fatal(fmt.Sprintf("cast %T(%+v) to %T(%+v) not equal, casted value is %T(%+v)",
-							a, a, b, b, v, v))
-					}
-				}()
+				}
 			}
 		}
 	}

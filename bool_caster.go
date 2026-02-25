@@ -11,13 +11,13 @@ import (
 	"unsafe"
 )
 
-func getBoolCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
+func getBoolCaster(s *Scope, fromType, toType reflect.Type) (castFunc, uint8) {
 	switch fromType.Kind() {
 	case reflect.Bool:
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			*(*bool)(toAddr) = *(*bool)(fromAddr)
 			return nil
-		}, false
+		}, 0
 	case reflect.Int:
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			if *(*int)(fromAddr) != 0 {
@@ -26,7 +26,7 @@ func getBoolCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 				*(*bool)(toAddr) = false
 			}
 			return nil
-		}, false
+		}, 0
 	case reflect.Int8:
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			if *(*int8)(fromAddr) != 0 {
@@ -35,7 +35,7 @@ func getBoolCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 				*(*bool)(toAddr) = false
 			}
 			return nil
-		}, false
+		}, 0
 	case reflect.Int16:
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			if *(*int16)(fromAddr) != 0 {
@@ -44,7 +44,7 @@ func getBoolCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 				*(*bool)(toAddr) = false
 			}
 			return nil
-		}, false
+		}, 0
 	case reflect.Int32:
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			if *(*int32)(fromAddr) != 0 {
@@ -53,7 +53,7 @@ func getBoolCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 				*(*bool)(toAddr) = false
 			}
 			return nil
-		}, false
+		}, 0
 	case reflect.Int64:
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			if *(*int64)(fromAddr) != 0 {
@@ -62,7 +62,7 @@ func getBoolCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 				*(*bool)(toAddr) = false
 			}
 			return nil
-		}, false
+		}, 0
 	case reflect.Uint:
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			if *(*uint)(fromAddr) != 0 {
@@ -71,7 +71,7 @@ func getBoolCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 				*(*bool)(toAddr) = false
 			}
 			return nil
-		}, false
+		}, 0
 	case reflect.Uint8:
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			if *(*uint8)(fromAddr) != 0 {
@@ -80,7 +80,7 @@ func getBoolCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 				*(*bool)(toAddr) = false
 			}
 			return nil
-		}, false
+		}, 0
 	case reflect.Uint16:
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			if *(*uint16)(fromAddr) != 0 {
@@ -89,7 +89,7 @@ func getBoolCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 				*(*bool)(toAddr) = false
 			}
 			return nil
-		}, false
+		}, 0
 	case reflect.Uint32:
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			if *(*uint32)(fromAddr) != 0 {
@@ -98,7 +98,7 @@ func getBoolCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 				*(*bool)(toAddr) = false
 			}
 			return nil
-		}, false
+		}, 0
 	case reflect.Uint64:
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			if *(*uint64)(fromAddr) != 0 {
@@ -107,7 +107,7 @@ func getBoolCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 				*(*bool)(toAddr) = false
 			}
 			return nil
-		}, false
+		}, 0
 	case reflect.Uintptr:
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			if *(*uintptr)(fromAddr) != 0 {
@@ -116,7 +116,7 @@ func getBoolCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 				*(*bool)(toAddr) = false
 			}
 			return nil
-		}, false
+		}, 0
 	case reflect.Float32:
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			if *(*float32)(fromAddr) != 0 {
@@ -125,7 +125,7 @@ func getBoolCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 				*(*bool)(toAddr) = false
 			}
 			return nil
-		}, false
+		}, 0
 	case reflect.Float64:
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			if *(*float64)(fromAddr) != 0 {
@@ -134,7 +134,7 @@ func getBoolCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 				*(*bool)(toAddr) = false
 			}
 			return nil
-		}, false
+		}, 0
 	case reflect.Interface:
 		return getUnpackInterfaceCaster(s, fromType, toType)
 	case reflect.Pointer:
@@ -148,8 +148,8 @@ func getBoolCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 			}
 			*(*bool)(toAddr) = res
 			return nil
-		}, false
+		}, 0
 	default:
-		return nil, false
+		return nil, 0
 	}
 }

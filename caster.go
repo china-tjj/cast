@@ -19,40 +19,49 @@ type casterKey struct {
 	toTypePtr   unsafe.Pointer
 }
 
-// fromAddr, toAddr都不能为 nil（fromType 为 nil 时允许 fromAddr 为 nil）
-// 要求 toAddr 指向的内存为 0 值 -> 转换失败时，若有部分写入，写回零值
+// fromAddr, toAddr都不能为 nil
+// 要求 toAddr 指向的内存为零值 -> 转换失败时，若有部分写入，写回零值
 type castFunc func(fromAddr, toAddr unsafe.Pointer) error
 
 type casterValue struct {
 	caster castFunc
-	hasRef bool
+	flag   uint8
 }
 
-// 第二个返回值，表示 toAddr 指向的内存，是否存在直接或间指向「fromAddr 指向的内存」的指针。
-// 当存在且 fromAddr 指向的内容是只读时，需要在转换前将 fromAddr 指向的内容拷贝用于转换。
-func getCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
+func getCaster(s *Scope, fromType, toType reflect.Type) (castFunc, uint8) {
+	cacheIdx := getCacheIdx(fromType, toType)
+	if cacheIdx != -1 {
+		v, ok := s.casterCache.load(cacheIdx)
+		if ok {
+			return v.caster, v.flag
+		}
+	}
 	key := casterKey{fromTypePtr: typePtr(fromType), toTypePtr: typePtr(toType)}
 	s.mu.RLock()
 	v, ok := s.casterMap[key]
 	s.mu.RUnlock()
 	if ok {
-		return v.caster, v.hasRef
+		return v.caster, v.flag
 	}
-	caster, hasRef := newCaster(s, fromType, toType)
+	caster, flag := newCaster(s, fromType, toType)
+	v = casterValue{caster, flag}
+	if cacheIdx != -1 {
+		s.casterCache.store(cacheIdx, v)
+	}
 	s.mu.Lock()
-	s.casterMap[key] = casterValue{caster, hasRef}
+	s.casterMap[key] = v
 	s.mu.Unlock()
-	return caster, hasRef
+	return caster, flag
 }
 
-func newCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
+func newCaster(s *Scope, fromType, toType reflect.Type) (castFunc, uint8) {
 	// 内存布局相同，直接强转
 	if isRefAble(s, fromType, toType) {
 		fromTypePtr := typePtr(fromType)
 		return func(fromAddr, toAddr unsafe.Pointer) error {
-			typedmemmove(fromTypePtr, toAddr, fromAddr)
+			typedMemMove(fromTypePtr, toAddr, fromAddr)
 			return nil
-		}, false
+		}, 0
 	}
 	switch toType.Kind() {
 	case reflect.Bool:
@@ -108,7 +117,7 @@ func newCaster(s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
 	case reflect.UnsafePointer:
 		return getUnsafePointerCaster(s, fromType, toType)
 	default:
-		return nil, false
+		return nil, 0
 	}
 }
 

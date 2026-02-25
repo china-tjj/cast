@@ -10,18 +10,18 @@ type iComplex interface {
 	~complex64 | ~complex128
 }
 
-func getComplexCaster[T iComplex](s *Scope, fromType, toType reflect.Type) (castFunc, bool) {
+func getComplexCaster[T iComplex](s *Scope, fromType, toType reflect.Type) (castFunc, uint8) {
 	switch fromType.Kind() {
 	case reflect.Complex64:
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			*(*T)(toAddr) = T(*(*complex64)(fromAddr))
 			return nil
-		}, false
+		}, 0
 	case reflect.Complex128:
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			*(*T)(toAddr) = T(*(*complex128)(fromAddr))
 			return nil
-		}, false
+		}, 0
 	case reflect.String:
 		toBitSize := int(8 * toType.Size())
 		return func(fromAddr, toAddr unsafe.Pointer) error {
@@ -31,8 +31,8 @@ func getComplexCaster[T iComplex](s *Scope, fromType, toType reflect.Type) (cast
 			}
 			*(*T)(toAddr) = T(c128)
 			return nil
-		}, false
+		}, 0
 	default:
-		return nil, false
+		return nil, 0
 	}
 }

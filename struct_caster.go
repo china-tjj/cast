@@ -174,9 +174,7 @@ func getStructCaster(s *Scope, fromType, toType reflect.Type) (castFunc, uint8) 
 				caster:        caster,
 				fromIsNilable: isNilableType(fromField.typ),
 			})
-			if isHasRef(fFlag) {
-				flag |= flagHasRef
-			}
+			flag |= fFlag
 		}
 		if len(metaFields) == 0 {
 			return func(fromAddr, toAddr unsafe.Pointer) error {

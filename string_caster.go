@@ -139,7 +139,7 @@ func getStringCaster(s *Scope, fromType, toType reflect.Type) (castFunc, uint8) 
 				toPtr.data = fromAddr
 				toPtr.len = length
 				return nil
-			}, flagHasRef
+			}, flagHasRef | flagRequireInHeap
 		default:
 			return nil, 0
 		}

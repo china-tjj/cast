@@ -32,7 +32,7 @@ func getPointerCaster(s *Scope, fromType, toType reflect.Type) (castFunc, uint8)
 					}
 					*(*unsafe.Pointer)(toAddr) = fromAddr
 					return nil
-				}, flagHasRef
+				}, flagHasRef | flagRequireInHeap
 			} else {
 				// fromDepth >= toDepth
 				return func(fromAddr, toAddr unsafe.Pointer) error {
@@ -47,38 +47,39 @@ func getPointerCaster(s *Scope, fromType, toType reflect.Type) (castFunc, uint8)
 				}, 0
 			}
 		}
-		var caster castFunc
-		var flag uint8
+		var elemCaster castFunc
+		var elemFlag uint8
 		fromElemKind := fromElemType.Kind()
 		if fromElemKind == reflect.Array && isRefAble(s, fromElemType.Elem(), toElemType) {
 			// [N]T -> *T
 			toDepth--
-			caster, flag = arrayToElemPtrCaster, flagHasRef
+			elemCaster, elemFlag = arrayToElemPtrCaster, flagHasRef|flagRequireInHeap
 		} else if fromElemKind == reflect.Slice && isRefAble(s, fromElemType.Elem(), toElemType) {
 			// []T -> *T
 			toDepth--
-			caster, flag = sliceToElemPtrCaster, 0
+			elemCaster, elemFlag = sliceToElemPtrCaster, 0
 		} else if fromElemKind == reflect.Slice && toElemType.Kind() == reflect.Array && isRefAble(s, fromElemType.Elem(), toElemType.Elem()) {
 			// []T -> *[N]T
 			toDepth--
-			caster, flag = getSliceToArrayPtrCaster(toElemType), 0
+			elemCaster, elemFlag = getSliceToArrayPtrCaster(toElemType), 0
 		} else if fromElemKind == reflect.String && isRefAble(s, byteType, toElemType) {
 			// string -> *byte
 			toDepth--
-			caster, flag = strToBytePtrCaster, 0
+			elemCaster, elemFlag = strToBytePtrCaster, 0
 		} else if fromElemKind == reflect.String && toElemType.Kind() == reflect.Array && isRefAble(s, byteType, toElemType.Elem()) {
 			// string -> *[N]byte
 			toDepth--
-			caster, flag = getStrToArrayPtrCaster(toElemType), 0
+			elemCaster, elemFlag = getStrToArrayPtrCaster(toElemType), 0
 		} else {
-			caster, flag = getCaster(s, fromElemType, toElemType)
+			elemCaster, elemFlag = getCaster(s, fromElemType, toElemType)
 		}
-		if caster == nil {
+		if elemCaster == nil {
 			return nil, 0
 		}
 		depth := min(fromDepth, toDepth)
-		if !(isHasRef(flag) && fromDepth <= toDepth && depth == 0) {
-			flag &= ^flagHasRef
+		var flag uint8
+		if fromDepth == 0 {
+			flag = elemFlag
 		}
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			for d := fromDepth; d > toDepth; d-- {
@@ -113,7 +114,7 @@ func getPointerCaster(s *Scope, fromType, toType reflect.Type) (castFunc, uint8)
 					toAddr = ptr
 				}
 			}
-			return caster(fromAddr, toAddr)
+			return elemCaster(fromAddr, toAddr)
 		}, flag
 	}
 }

@@ -30,6 +30,20 @@ func getStringCaster(s *Scope, fromType, toType reflect.Type) (castFunc, uint8) 
 			return nil
 		}, 0
 	}
+	// 如果 `*T` 实现了 Stringer 接口，`T` 转 string 时也会调用 String 方法
+	if fromType.Kind() != reflect.Ptr {
+		fromPtrType := reflect.PointerTo(fromType)
+		if fromPtrType.Implements(stringerType) {
+			return func(fromAddr, toAddr unsafe.Pointer) error {
+				from, ok := packEface(fromPtrType, fromAddr).(fmt.Stringer)
+				if !ok || from == nil {
+					return NilStringerErr
+				}
+				*(*string)(toAddr) = from.String()
+				return nil
+			}, flagHasRef | flagRequireInHeap
+		}
+	}
 	switch fromType.Kind() {
 	case reflect.Bool:
 		return func(fromAddr, toAddr unsafe.Pointer) error {

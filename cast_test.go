@@ -289,6 +289,49 @@ func TestMapToStruct(t *testing.T) {
 	}
 }
 
+type Stringer struct{}
+
+func (s *Stringer) String() string {
+	return "i am stringer"
+}
+
+type StringerWrapper struct {
+	V Stringer
+}
+
+func TestStringer(t *testing.T) {
+	s := &StringerWrapper{}
+	m, err := To[map[string]string](s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m["V"] != s.V.String() {
+		t.Fatal(m["V"])
+	}
+}
+
+type HackStringer struct {
+	v int
+}
+
+func (s *HackStringer) String() string {
+	s.v = 10086
+	return strconv.Itoa(s.v)
+}
+
+func TestHackStringer(t *testing.T) {
+	k := HackStringer{v: 1}
+	m := map[HackStringer]struct{}{
+		k: {},
+	}
+	_, _ = To[map[string]struct{}](m)
+	for key := range m {
+		if key != k {
+			t.Fatal(key)
+		}
+	}
+}
+
 func TestStackRefCast(t *testing.T) {
 	s := func() string {
 		s, _ := Cast[[3]byte, string]([3]byte{'a', 'b', 'c'})

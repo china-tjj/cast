@@ -71,7 +71,7 @@ func getFuncCaster(s *Scope, fromType, toType reflect.Type) (castFunc, uint8) {
 				_, fnPtr := unpackEface(to.Interface())
 				*(*unsafe.Pointer)(toAddr) = fnPtr
 				return nil
-			}, 0
+			}, flagRequireInHeap
 		}
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			if *(*func())(fromAddr) == nil {
@@ -109,7 +109,7 @@ func getFuncCaster(s *Scope, fromType, toType reflect.Type) (castFunc, uint8) {
 			_, fnPtr := unpackEface(to.Interface())
 			*(*unsafe.Pointer)(toAddr) = fnPtr
 			return nil
-		}, 0
+		}, flagRequireInHeap
 	case reflect.Interface:
 		return getUnpackInterfaceCaster(s, fromType, toType)
 	case reflect.Pointer:
@@ -129,6 +129,7 @@ func getReflectCaster(s *Scope, fromType reflect.Type, toType reflect.Type) refl
 	return func(from reflect.Value) (reflect.Value, error) {
 		// 这里不需要检查from.IsValid()
 		toPtr := reflect.New(toType)
+		// getValueAddr返回的一定指向堆上可写内存的指针
 		err := caster(getValueAddr(from), toPtr.UnsafePointer())
 		return toPtr.Elem(), err
 	}

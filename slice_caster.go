@@ -23,7 +23,7 @@ func getSliceCaster(s *Scope, fromType, toType reflect.Type) (castFunc, uint8) {
 				to.len = length
 				to.cap = length
 				return nil
-			}, flagHasRef
+			}, flagHasRef | flagRequireInHeap
 		}
 		elemCaster, hasRef := getCaster(s, fromElemType, toElemType)
 		if elemCaster == nil {

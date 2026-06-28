@@ -65,6 +65,9 @@ func isMemSame(s *Scope, fromType, toType reflect.Type) bool {
 		for i := 0; i < n; i++ {
 			fromField := fromType.Field(i)
 			toField := toType.Field(i)
+			if fromField.Offset != toField.Offset {
+				return false
+			}
 			if !s.castUnexported && (!fromField.IsExported() || !toField.IsExported()) {
 				return false
 			}

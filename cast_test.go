@@ -126,6 +126,15 @@ func TestFuncCast(t *testing.T) {
 	if err == nil || err.Error() != `cast in arg 1 from string to int failed: strconv.ParseInt: parsing "abc": invalid syntax` {
 		t.Fatal(err)
 	}
+
+	strAdd3, err := Cast[*func(a int, b int) int, *func(a string, b string) string](&add)
+	if err != nil {
+		t.Fatal()
+	}
+	c = (*strAdd3)("1", "2")
+	if c != "3" {
+		t.Fatal(c)
+	}
 }
 
 func TestSliceFuncCast(t *testing.T) {
@@ -277,6 +286,68 @@ func TestMapToStruct(t *testing.T) {
 	s, err := To[Struct](m)
 	if err != nil || s.Value1 != 1 {
 		t.Fatal(err)
+	}
+}
+
+type Stringer struct{}
+
+func (s *Stringer) String() string {
+	return "i am stringer"
+}
+
+type StringerWrapper struct {
+	V Stringer
+}
+
+func TestStringer(t *testing.T) {
+	s := &StringerWrapper{}
+	m, err := To[map[string]string](s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m["V"] != s.V.String() {
+		t.Fatal(m["V"])
+	}
+}
+
+type HackStringer struct {
+	v int
+}
+
+func (s *HackStringer) String() string {
+	s.v = 10086
+	return strconv.Itoa(s.v)
+}
+
+func TestHackStringer(t *testing.T) {
+	k := HackStringer{v: 1}
+	m := map[HackStringer]struct{}{
+		k: {},
+	}
+	_, _ = To[map[string]struct{}](m)
+	for key := range m {
+		if key != k {
+			t.Fatal(key)
+		}
+	}
+}
+
+func TestStackRefCast(t *testing.T) {
+	s := func() string {
+		s, _ := Cast[[3]byte, string]([3]byte{'a', 'b', 'c'})
+		return s
+	}()
+	overwriteStack(3)
+	if s != "abc" {
+		t.Fatal(fmt.Sprintf("%q", s))
+	}
+}
+
+func overwriteStack(size int) {
+	var v byte
+	_ = v
+	if size > 0 {
+		overwriteStack(size - 1)
 	}
 }
 

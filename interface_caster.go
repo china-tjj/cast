@@ -62,7 +62,7 @@ func getInterfaceCaster(s *Scope, fromType, toType reflect.Type) (castFunc, uint
 		return func(fromAddr, toAddr unsafe.Pointer) error {
 			*(*any)(toAddr) = packEface(fromType, fromAddr)
 			return nil
-		}, flagHasRef
+		}, flagHasRef | flagRequireInHeap
 	}
 
 	if fromKind == reflect.Interface {

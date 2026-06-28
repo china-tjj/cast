@@ -124,9 +124,7 @@ func getMapCaster(s *Scope, fromType, toType reflect.Type) (castFunc, uint8) {
 				key:         fieldKey,
 				caster:      caster,
 			})
-			if isHasRef(fFlag) {
-				flag |= flagHasRef
-			}
+			flag |= fFlag
 		}
 		// 小优化，减少堆内存分配
 		globalValueBuffer := newObject(toElemType)

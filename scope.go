@@ -105,6 +105,7 @@ func ToWithScope[T any](s *Scope, from any) (to T, err error) {
 		// 接口存非指针时，eface 的指针指向的内存是只读的，若有指针指向该块内存，需拷贝
 		trueFromElemAddr = copyObject(fromElemType, trueFromElemAddr)
 	}
+	// fromElemAddr一定在堆上，不用考虑isRequireInHeap
 	err = caster(trueFromElemAddr, noEscape(unsafe.Pointer(&to)))
 	return to, err
 }
@@ -112,24 +113,35 @@ func ToWithScope[T any](s *Scope, from any) (to T, err error) {
 // CastWithScope 将类型F转为T，转换规则详见README
 func CastWithScope[F any, T any](s *Scope, from F) (to T, err error) {
 	fromType, toType := typeFor[F](), typeFor[T]()
-	caster, _ := getCaster(s, fromType, toType)
+	caster, flag := getCaster(s, fromType, toType)
 	if caster == nil {
 		return to, invalidCastErr(s, fromType, toType)
 	}
-	// 当from包含指针时，这部分指针指向的内容会逃逸
-	escape(from)
-	err = caster(noEscape(unsafe.Pointer(&from)), noEscape(unsafe.Pointer(&to)))
+	if isRequireInHeap(flag) {
+		fromInHeap := from
+		err = caster(unsafe.Pointer(&fromInHeap), noEscape(unsafe.Pointer(&to)))
+	} else {
+		// 当from包含指针时，这部分指针指向的内容会逃逸
+		escape(from)
+		err = caster(noEscape(unsafe.Pointer(&from)), noEscape(unsafe.Pointer(&to)))
+	}
 	return to, err
 }
 
 // GetCasterWithScope 获取实例化的转换方法，调用该方法返回的函数，对比直接调用 Cast 少了查缓存的步骤，性能会略微好一点
 func GetCasterWithScope[F any, T any](s *Scope) func(from F) (to T, err error) {
 	fromType, toType := typeFor[F](), typeFor[T]()
-	caster, _ := getCaster(s, fromType, toType)
+	caster, flag := getCaster(s, fromType, toType)
 	if caster == nil {
 		e := invalidCastErr(s, fromType, toType)
 		return func(from F) (to T, err error) {
 			return to, e
+		}
+	}
+	if isRequireInHeap(flag) {
+		return func(from F) (to T, err error) {
+			err = caster(unsafe.Pointer(&from), noEscape(unsafe.Pointer(&to)))
+			return to, err
 		}
 	}
 	return func(from F) (to T, err error) {
@@ -143,9 +155,15 @@ func GetCasterWithScope[F any, T any](s *Scope) func(from F) (to T, err error) {
 // MustGetCasterWithScope 获取实例化的转换方法，调用该方法返回的函数，对比直接调用 Cast 少了查缓存的步骤，性能会略微好一点。当不允许这两个类型之间的转换时会 panic
 func MustGetCasterWithScope[F any, T any](s *Scope) func(from F) (to T, err error) {
 	fromType, toType := typeFor[F](), typeFor[T]()
-	caster, _ := getCaster(s, fromType, toType)
+	caster, flag := getCaster(s, fromType, toType)
 	if caster == nil {
 		panic(invalidCastErr(s, fromType, toType))
+	}
+	if isRequireInHeap(flag) {
+		return func(from F) (to T, err error) {
+			err = caster(unsafe.Pointer(&from), noEscape(unsafe.Pointer(&to)))
+			return to, err
+		}
 	}
 	return func(from F) (to T, err error) {
 		// 当from包含指针时，这部分指针指向的内容会逃逸
@@ -172,6 +190,7 @@ func ReflectCastWithScope(s *Scope, from reflect.Value, toType reflect.Type) (to
 		return reflect.Value{}, invalidCastErr(s, fromType, toType)
 	}
 	toPtr := reflect.New(toType)
+	// getValueAddr返回的一定指向堆上可写内存的指针
 	err = caster(getValueAddr(from), toPtr.UnsafePointer())
 	return toPtr.Elem(), err
 }
@@ -192,7 +211,7 @@ func WithCaster[F any, T any](caster func(s *Scope, from F) (to T, err error)) S
 				return err
 			}
 		}
-		s.casterMap[key] = casterValue{wrappedCaster, flagCustom}
+		s.casterMap[key] = casterValue{wrappedCaster, 0}
 		if fromType == anyType {
 			s.definedFromAnyCaster = true
 		}

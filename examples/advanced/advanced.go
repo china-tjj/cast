@@ -2,12 +2,13 @@ package main
 
 import (
 	"fmt"
-	"github.com/china-tjj/cast"
 	"time"
+
+	"github.com/china-tjj/cast"
 )
 
 func CastTimeToString(s *cast.Scope, t time.Time) (string, error) {
-	return t.Format(time.DateTime), nil
+	return t.Format("2006-01-02 15:04:05"), nil
 }
 
 func main() {
@@ -16,7 +17,4 @@ func main() {
 
 	str, err := cast.CastWithScope[time.Time, string](scope, t)
 	fmt.Println(str, err) // 2025-10-04 19:55:54 <nil>
-
-	bytes, err := cast.CastWithScope[time.Time, []byte](scope, t)
-	fmt.Println(string(bytes), err) // 2025-10-04 19:55:54 <nil>
 }

@@ -67,3 +67,41 @@ func TestDeepCopy4(t *testing.T) {
 		t.Fatal(copied, err)
 	}
 }
+
+func TestMapDeepCopy(t *testing.T) {
+	testMapDeepCopy(t, [1]byte{1}, 1)
+	testMapDeepCopy(t, [2]byte{1}, 1)
+	testMapDeepCopy(t, [4]byte{1}, 1)
+	testMapDeepCopy(t, [8]byte{1}, 1)
+	testMapDeepCopy(t, [1024]byte{1}, 1)
+	testMapDeepCopy(t, struct {
+		V1 int32
+		V2 int32
+	}{1, 2}, 1)
+	testMapDeepCopy(t, struct {
+		V1 int32
+		V2 int16
+		V3 uint8
+	}{1, 2, 3}, 1)
+	testMapDeepCopy(t, struct {
+		V1 int32
+		V2 int16
+		V3 uint8
+		V4 uint8
+	}{1, 2, 3, 4}, 1)
+	testMapDeepCopy(t, "1", 1)
+	testMapDeepCopy(t, "1", [1024]byte{1})
+}
+
+func testMapDeepCopy[K, V comparable](t *testing.T, k K, v V) {
+	m := map[K]V{
+		k: v,
+	}
+	m2, err := DeepCopy(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m2[k] != v {
+		t.Fatal()
+	}
+}
